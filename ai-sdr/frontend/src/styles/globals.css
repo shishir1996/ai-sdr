@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --sidebar-bg: 222 47% 11%;
+    --sidebar-fg: 210 40% 96%;
+    --sidebar-muted: 215 20% 65%;
+    --sidebar-accent: 263 70% 50%;
+    --sidebar-accent-fg: 0 0% 100%;
+
+    --surface-bg: 0 0% 100%;
+    --surface-secondary: 210 40% 98%;
+    --surface-border: 214 32% 91%;
+
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --primary: 263 70% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 263 70% 96%;
+    --accent-foreground: 263 70% 50%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 263 70% 50%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --sidebar-bg: 222 47% 11%;
+    --sidebar-fg: 210 40% 96%;
+    --sidebar-muted: 215 20% 65%;
+    --sidebar-accent: 263 70% 50%;
+    --sidebar-accent-fg: 0 0% 100%;
+
+    --surface-bg: 222 47% 11%;
+    --surface-secondary: 217 33% 17%;
+    --surface-border: 215 25% 27%;
+
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 217 33% 17%;
+    --card-foreground: 210 40% 98%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 263 70% 20%;
+    --accent-foreground: 263 70% 80%;
+    --destructive: 0 62% 30%;
+    --border: 215 25% 27%;
+    --input: 215 25% 27%;
+    --ring: 263 70% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-[hsl(var(--border))];
+  }
+  body {
+    @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))];
+  }
+}
+
+@layer components {
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+           text-gray-400 hover:text-white hover:bg-white/5
+           transition-colors duration-150;
+  }
+
+  .sidebar-link-active {
+    @apply text-white bg-purple-600/20;
+  }
+
+  .card {
+    @apply bg-[hsl(var(--card))] text-[hsl(var(--card-foreground))]
+           rounded-xl border shadow-sm;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium
+           bg-purple-600 text-white hover:bg-purple-700
+           transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-purple-500;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium
+           bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]
+           hover:bg-[hsl(var(--muted))] transition-colors duration-150;
+  }
+}
