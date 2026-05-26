@@ -36,8 +36,13 @@ const config: Config = {
         },
       },
       animation: {
-        "fade-in": "fadeIn 0.2s ease-in-out",
-        "slide-in": "slideIn 0.2s ease-out",
+        "fade-in": "fadeIn 0.3s ease-out",
+        "slide-in": "slideIn 0.3s ease-out",
+        "scale-in": "scaleIn 0.2s ease-out",
+        "spin-slow": "spin 3s linear infinite",
+        "pulse-glow": "pulse-glow 3s ease-in-out infinite",
+        float: "float 6s ease-in-out infinite",
+        "gradient-shift": "gradient-shift 8s ease infinite",
       },
       keyframes: {
         fadeIn: {
@@ -47,6 +52,10 @@ const config: Config = {
         slideIn: {
           "0%": { transform: "translateX(-10px)", opacity: "0" },
           "100%": { transform: "translateX(0)", opacity: "1" },
+        },
+        scaleIn: {
+          "0%": { transform: "scale(0.95)", opacity: "0" },
+          "100%": { transform: "scale(1)", opacity: "1" },
         },
       },
     },

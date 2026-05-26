@@ -54,7 +54,7 @@ export default function AuditPage() {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+             onClick={() => setActiveTab(tab.id as "activity" | "ai" | "notifications")}
             className={`flex items-center gap-2 px-4 py-2 rounded-t text-sm ${
               activeTab === tab.id ? "bg-gray-800 text-white border-b-2 border-indigo-500" : "text-gray-400 hover:text-white"
             }`}
