@@ -131,6 +131,21 @@ INTEGRATION_META = {
         "description": "AI model inference for lead scoring, email drafting, and call scripts",
         "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "tgp_..."}],
     },
+    "openai": {
+        "label": "OpenAI",
+        "description": "GPT-4o and GPT-3.5 Turbo for AI-powered features",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "sk-..."}],
+    },
+    "anthropic": {
+        "label": "Anthropic (Claude)",
+        "description": "Claude 3.5 Sonnet and Claude 3 Haiku for AI tasks",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "sk-ant-..."}],
+    },
+    "google_ai": {
+        "label": "Google AI (Gemini)",
+        "description": "Gemini 1.5 Pro and Flash models",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "AIza..."}],
+    },
     "gmail": {
         "label": "Gmail API",
         "description": "Send and track emails via Google Gmail",

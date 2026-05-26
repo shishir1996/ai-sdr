@@ -7,6 +7,8 @@ from app.models.integration import Integration
 from app.models.agent import SDRProfile, LeadState, AgentLog
 from app.models.settings import OrgSettings
 from app.models.scrape_profile import ScrapeProfile
+from app.models.audit import AuditLog, AiUsageLog, Notification
+from app.models.smtp import SMTPConfig
 from app.database import Base
 
 __all__ = [
@@ -20,4 +22,6 @@ __all__ = [
     "SDRProfile", "LeadState", "AgentLog",
     "OrgSettings",
     "ScrapeProfile",
+    "AuditLog", "AiUsageLog", "Notification",
+    "SMTPConfig",
 ]

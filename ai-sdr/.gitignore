@@ -1,15 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+aisdr.db
+*.db
+
+# Node
 node_modules/
 .next/
-__pycache__/
-*.pyc
+out/
+
+# Env
 .env
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
-*.db
-*.sqlite3
-gmail_token.json
-credentials.json
+.env.local
+.env.production
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 .DS_Store
+
+# Secrets
+credentials.json
+gmail_token.json
+*.pem
+
+# Playwright
+/tmp/linkedin_cookies_*.json
+
+# Logs
+*.log
+/backend/aisdr.db

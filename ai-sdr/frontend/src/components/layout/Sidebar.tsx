@@ -5,8 +5,10 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Users, Mail, PhoneCall, Target, BarChart3, Settings,
   ChevronLeft, ChevronRight, Building2, Plug, ToggleLeft, Brain, Activity,
+  MailCheck, ScrollText,
 } from "lucide-react"
 import { useState } from "react"
+
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/leads", label: "Leads", icon: Users },
@@ -17,6 +19,9 @@ const navItems = [
   { type: "divider" as const },
   { href: "/sdr", label: "AI SDR", icon: Brain },
   { href: "/agent", label: "Agent Activity", icon: Activity },
+  { type: "divider" as const },
+  { href: "/smtp", label: "SMTP Config", icon: MailCheck },
+  { href: "/audit", label: "Monitoring", icon: ScrollText },
   { type: "divider" as const },
   { href: "/admin/integrations", label: "Integrations", icon: Plug },
   { href: "/admin/feature-flags", label: "Feature Flags", icon: ToggleLeft },

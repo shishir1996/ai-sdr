@@ -1,3 +1,4 @@
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import event
@@ -11,6 +12,8 @@ def get_engine():
     connect_args = {}
     if settings.DATABASE_URL.startswith("sqlite"):
         connect_args["check_same_thread"] = False
+    elif settings.DATABASE_URL.startswith("postgresql"):
+        connect_args = {}
     return create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG, connect_args=connect_args)
 
 
@@ -35,5 +38,24 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    if settings.DATABASE_URL.startswith("sqlite"):
+        async with engine.begin() as conn:
+            from sqlalchemy import text
+            await conn.execute(text("PRAGMA journal_mode=WAL"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+
+SUPABASE_URL: Optional[str] = None
+SUPABASE_SERVICE_KEY: Optional[str] = None
+SUPABASE_ANON_KEY: Optional[str] = None
+
+
+def init_supabase():
+    global SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_ANON_KEY
+    SUPABASE_URL = settings.SUPABASE_URL
+    SUPABASE_SERVICE_KEY = settings.SUPABASE_SERVICE_KEY
+    SUPABASE_ANON_KEY = settings.SUPABASE_ANON_KEY

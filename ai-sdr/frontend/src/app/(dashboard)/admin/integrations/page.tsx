@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from "react"
 import { api } from "@/lib/api-client"
-import { Save, Key, Check, AlertCircle, ExternalLink, LogOut, ChevronDown, ChevronRight } from "lucide-react"
+import { Save, Key, Check, AlertCircle, ExternalLink, LogOut, ChevronDown, ChevronRight, Cpu } from "lucide-react"
 
 interface ProviderMeta {
   provider: string
   label: string
   description: string
   fields: { key: string; label: string; type: string; placeholder: string }[]
+  warning?: string
 }
 
 interface Integration {
@@ -19,6 +20,8 @@ interface Integration {
   has_api_secret: boolean
   has_refresh_token: boolean
 }
+
+const AI_PROVIDERS = ["together_ai", "openai", "anthropic", "google_ai"]
 
 export default function IntegrationsPage() {
   const [providers, setProviders] = useState<ProviderMeta[]>([])
@@ -73,12 +76,15 @@ export default function IntegrationsPage() {
 
   const getIntegration = (provider: string) => integrations.find((i) => i.provider === provider)
 
+  const aiProviders = providers.filter((p) => AI_PROVIDERS.includes(p.provider))
+  const otherProviders = providers.filter((p) => !AI_PROVIDERS.includes(p.provider))
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-semibold">Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Configure API keys for external services. Keys are encrypted at rest.
+          Configure API keys for external services. Keys are encrypted at rest and never exposed.
         </p>
       </div>
 
@@ -90,91 +96,177 @@ export default function IntegrationsPage() {
       )}
 
       <div className="space-y-4">
-        {providers.map((provider) => {
-          const integration = getIntegration(provider.provider)
-          const isSaved = !!integration
-          const isSaving = saving[provider.provider]
-          const isSavedNotif = saved[provider.provider]
+        {/* AI Providers Section */}
+        {aiProviders.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Cpu size={18} className="text-purple-500" />
+              <h2 className="text-lg font-semibold">AI Providers</h2>
+              <span className="text-xs text-muted-foreground">At least one required for AI features</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {aiProviders.map((provider) => {
+                const integration = getIntegration(provider.provider)
+                const isSaved = !!integration
+                const isSaving = saving[provider.provider]
+                const isSavedNotif = saved[provider.provider]
 
-          return (
-            <div key={provider.provider} className="card p-5">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold">{provider.label}</h3>
-                    {isSaved && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600">
-                        <Check size={12} />
-                        Configured
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">{provider.description}</p>
-                </div>
-                <Key size={20} className="text-muted-foreground shrink-0" />
-              </div>
+                return (
+                  <div key={provider.provider} className="card p-4 border-purple-500/20">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold">{provider.label}</h3>
+                          {isSaved && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600">
+                              <Check size={12} /> Added
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">{provider.description}</p>
+                      </div>
+                      <Key size={18} className="text-muted-foreground shrink-0" />
+                    </div>
 
-              <div className="space-y-3">
-                {provider.fields.map((field) => (
-                  <div key={field.key}>
-                    <label className="block text-sm font-medium mb-1">{field.label}</label>
-                    <div className="relative">
-                      <input
-                        type={field.type}
-                        placeholder={isSaved ? "•••••••• (replace to update)" : field.placeholder}
-                        value={formData[provider.provider]?.[field.key] || ""}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            [provider.provider]: {
-                              ...(prev[provider.provider] || {}),
-                              [field.key]: e.target.value,
-                            },
-                          }))
-                        }
-                        className="w-full px-3 py-2 rounded-lg border bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 pr-10"
-                      />
+                    <div className="space-y-2.5">
+                      {provider.fields.map((field) => (
+                        <div key={field.key}>
+                          <label className="block text-xs font-medium mb-1">{field.label}</label>
+                          <input
+                            type={field.type}
+                            placeholder={isSaved ? "•••••••• (replace to update)" : field.placeholder}
+                            value={formData[provider.provider]?.[field.key] || ""}
+                            onChange={(e) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                [provider.provider]: {
+                                  ...(prev[provider.provider] || {}),
+                                  [field.key]: e.target.value,
+                                },
+                              }))
+                            }
+                            className="w-full px-3 py-2 rounded-lg border bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-end mt-3 gap-2">
+                      {isSavedNotif && (
+                        <span className="text-xs text-green-600 flex items-center gap-1"><Check size={14} /> Saved</span>
+                      )}
+                      <button
+                        onClick={() => handleSave(provider.provider)}
+                        disabled={isSaving || !formData[provider.provider]}
+                        className="btn-primary text-sm disabled:opacity-50"
+                      >
+                        {isSaving ? (
+                          <span className="flex items-center gap-1">
+                            <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                            Saving...
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1"><Save size={16} /> {isSaved ? "Update" : "Save"}</span>
+                        )}
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-
-              {provider.provider === "gmail" && (
-                <GmailSetupGuide />
-              )}
-
-              <div className="flex items-center justify-end mt-4 gap-2">
-                {isSavedNotif && (
-                  <span className="text-xs text-green-600 flex items-center gap-1">
-                    <Check size={14} /> Saved
-                  </span>
-                )}
-                {provider.provider === "gmail" && isSaved && (
-                  <GmailConnectButton
-                    hasRefreshToken={integration?.has_refresh_token || false}
-                  />
-                )}
-                <button
-                  onClick={() => handleSave(provider.provider)}
-                  disabled={isSaving || !formData[provider.provider]}
-                  className="btn-primary text-sm disabled:opacity-50"
-                >
-                  {isSaving ? (
-                    <span className="flex items-center gap-1">
-                      <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                      Saving...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1">
-                      <Save size={16} />
-                      {isSaved ? "Update" : "Save"}
-                    </span>
-                  )}
-                </button>
-              </div>
+                )
+              })}
             </div>
-          )
-          })}
+          </div>
+        )}
+
+        {/* Other Providers Section */}
+        <div>
+          <h2 className="text-lg font-semibold mb-3">Other Services</h2>
+          <div className="space-y-3">
+            {otherProviders.map((provider) => {
+              const integration = getIntegration(provider.provider)
+              const isSaved = !!integration
+              const isSaving = saving[provider.provider]
+              const isSavedNotif = saved[provider.provider]
+
+              return (
+                <div key={provider.provider} className="card p-5">
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold">{provider.label}</h3>
+                        {isSaved && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600">
+                            <Check size={12} /> Configured
+                          </span>
+                        )}
+                        {provider.warning && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600">
+                            <AlertCircle size={12} /> Warning
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">{provider.description}</p>
+                    </div>
+                    <Key size={20} className="text-muted-foreground shrink-0" />
+                  </div>
+
+                  {provider.warning && (
+                    <div className="mb-3 p-2 rounded bg-amber-500/5 border border-amber-500/20 text-xs text-amber-600">
+                      {provider.warning}
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {provider.fields.map((field) => (
+                      <div key={field.key}>
+                        <label className="block text-sm font-medium mb-1">{field.label}</label>
+                        <input
+                          type={field.type}
+                          placeholder={isSaved ? "•••••••• (replace to update)" : field.placeholder}
+                          value={formData[provider.provider]?.[field.key] || ""}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              [provider.provider]: {
+                                ...(prev[provider.provider] || {}),
+                                [field.key]: e.target.value,
+                              },
+                            }))
+                          }
+                          className="w-full px-3 py-2 rounded-lg border bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {provider.provider === "gmail" && <GmailSetupGuide />}
+
+                  <div className="flex items-center justify-end mt-4 gap-2">
+                    {isSavedNotif && (
+                      <span className="text-xs text-green-600 flex items-center gap-1"><Check size={14} /> Saved</span>
+                    )}
+                    {provider.provider === "gmail" && isSaved && (
+                      <GmailConnectButton hasRefreshToken={integration?.has_refresh_token || false} />
+                    )}
+                    <button
+                      onClick={() => handleSave(provider.provider)}
+                      disabled={isSaving || !formData[provider.provider]}
+                      className="btn-primary text-sm disabled:opacity-50"
+                    >
+                      {isSaving ? (
+                        <span className="flex items-center gap-1">
+                          <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                          Saving...
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1"><Save size={16} /> {isSaved ? "Update" : "Save"}</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -200,13 +292,13 @@ function GmailSetupGuide() {
             <li>Enable the <strong>Gmail API</strong> from the API Library</li>
             <li>Go to <strong>Credentials</strong> → <strong>Create Credentials</strong> → <strong>OAuth 2.0 Client ID</strong></li>
             <li>Application type: <strong>Web application</strong></li>
-            <li>Add redirect URI: <code className="bg-muted px-1 py-0.5 rounded text-xs">http://localhost:8000/api/v1/email/oauth-callback</code></li>
+            <li>Add redirect URI: <code className="bg-muted px-1 py-0.5 rounded text-xs">https://api.offdx.in/api/v1/email/oauth-callback</code></li>
             <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields above</li>
             <li>Click <strong>Save</strong>, then click <strong>Connect Gmail</strong> to authorize</li>
           </ol>
           <p className="text-xs mt-2">
-            Make sure the redirect URI matches your backend URL exactly.
-            For production, use your actual domain instead of localhost.
+            For development, use http://localhost:8000/api/v1/email/oauth-callback.
+            For production, use https://api.offdx.in/api/v1/email/oauth-callback.
           </p>
         </div>
       )}

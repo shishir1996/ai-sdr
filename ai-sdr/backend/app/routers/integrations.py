@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Optional
@@ -6,74 +6,64 @@ from typing import Optional
 from app.database import get_db
 from app.models.user import User
 from app.utils.auth import get_current_admin
-from app.services.integrations.service import (
-    set_integration, delete_integration, list_integrations,
-    get_integration, INTEGRATION_META,
-)
+from app.services.integrations.service import set_integration, list_integrations, delete_integration, INTEGRATION_META
 
-router = APIRouter(prefix="/admin/integrations", tags=["integrations"])
+router = APIRouter(prefix="/admin/integrations", tags=["admin-integrations"])
 
 
-class IntegrationUpdate(BaseModel):
+class IntegrationSave(BaseModel):
     api_key: Optional[str] = None
     api_secret: Optional[str] = None
     is_active: bool = True
-    label: Optional[str] = None
-
-
-@router.get("/providers")
-async def get_providers(
-    admin: User = Depends(get_current_admin),
-):
-    return [
-        {
-            "provider": key,
-            "label": meta["label"],
-            "description": meta["description"],
-            "fields": meta["fields"],
-        }
-        for key, meta in INTEGRATION_META.items()
-    ]
 
 
 @router.get("")
-async def list_org_integrations(
+async def get_integrations(
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    user: User = Depends(get_current_admin),
 ):
-    return await list_integrations(db, admin.org_id)
+    return await list_integrations(db, user.org_id)
 
 
 @router.put("/{provider}")
-async def upsert_integration(
+async def save_integration(
     provider: str,
-    body: IntegrationUpdate,
+    body: IntegrationSave,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    user: User = Depends(get_current_admin),
 ):
     if provider not in INTEGRATION_META:
-        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
-
-    integration = await set_integration(
-        db, admin.org_id, provider,
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown provider: {provider}")
+    await set_integration(
+        db=db,
+        org_id=user.org_id,
+        provider=provider,
         api_key=body.api_key,
         api_secret=body.api_secret,
         is_active=body.is_active,
-        label=body.label,
     )
-    return {
-        "provider": integration.provider,
-        "is_active": integration.is_active,
-        "has_api_key": bool(integration.api_key_encrypted),
-        "has_api_secret": bool(integration.api_secret_encrypted),
-    }
+    return {"status": "saved"}
 
 
 @router.delete("/{provider}")
 async def remove_integration(
     provider: str,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    user: User = Depends(get_current_admin),
 ):
-    await delete_integration(db, admin.org_id, provider)
+    await delete_integration(db, user.org_id, provider)
     return {"status": "deleted"}
+
+
+@router.get("/providers")
+async def list_providers():
+    return [
+        {
+            "provider": key,
+            "label": meta["label"],
+            "description": meta["description"],
+            "fields": meta["fields"],
+            "warning": meta.get("warning"),
+        }
+        for key, meta in INTEGRATION_META.items()
+    ]

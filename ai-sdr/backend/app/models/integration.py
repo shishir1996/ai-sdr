@@ -17,6 +17,9 @@ def generate_uuid():
 
 INTEGRATION_PROVIDERS = [
     "together_ai",
+    "openai",
+    "anthropic",
+    "google_ai",
     "gmail",
     "vapi",
     "apollo",
