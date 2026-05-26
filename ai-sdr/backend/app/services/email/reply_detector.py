@@ -64,16 +64,83 @@ def check_for_replies(
         in_reply_to = headers.get("In-Reply-To", "")
         subject = headers.get("Subject", "")
         snippet = detail.get("snippet", "")
+        rfc_message_id = headers.get("Message-ID", "").strip("<>")
+        references = headers.get("References", "")
 
         if in_reply_to:
             replies.append({
                 "message_id": msg["id"],
+                "rfc_message_id": rfc_message_id or msg["id"],
                 "subject": subject,
                 "snippet": snippet,
-                "in_reply_to": in_reply_to,
+                "in_reply_to": in_reply_to.strip("<>"),
+                "references": references,
                 "from": headers.get("From", lead_email),
                 "date": headers.get("Date", ""),
                 "thread_id": detail.get("threadId", ""),
             })
+
+    return replies
+
+
+def check_imap_replies_for_profile(
+    sdr_creds: Optional[dict],
+    lead_email: str,
+    since: Optional[datetime] = None,
+) -> list[dict]:
+    if not sdr_creds or sdr_creds.get("provider") != "smtp":
+        return []
+    from app.services.email.imap_client import check_imap_replies, get_imap_settings
+
+    stored_imap = None
+    if sdr_creds.get("imap_host"):
+        stored_imap = {
+            "host": sdr_creds["imap_host"],
+            "port": sdr_creds.get("imap_port", 993),
+            "use_ssl": sdr_creds.get("imap_use_ssl", True),
+        }
+
+    host = sdr_creds.get("host", "")
+    provider = sdr_creds.get("provider_name", "custom")
+    imap_cfg = get_imap_settings(host, provider, stored_imap=stored_imap)
+    if not imap_cfg:
+        return []
+
+    imap_username = sdr_creds.get("imap_username") or sdr_creds.get("username", "")
+    imap_password = sdr_creds.get("imap_password") or sdr_creds.get("password", "")
+
+    return check_imap_replies(
+        host=imap_cfg["host"],
+        port=imap_cfg["port"],
+        use_ssl=imap_cfg["use_ssl"],
+        username=imap_username,
+        password=imap_password,
+        lead_email=lead_email,
+        since=since,
+    )
+
+
+def check_email_replies(
+    lead_email: str,
+    since: Optional[datetime] = None,
+    gmail_client_id: Optional[str] = None,
+    gmail_secret: Optional[str] = None,
+    gmail_refresh: Optional[str] = None,
+    sdr_email_creds: Optional[dict] = None,
+) -> list[dict]:
+    replies = []
+    if gmail_client_id and gmail_refresh:
+        try:
+            replies = check_for_replies(gmail_client_id, gmail_secret or "", gmail_refresh, lead_email, since)
+            if replies:
+                return replies
+        except Exception as e:
+            logger.warning(f"Gmail reply check failed: {e}")
+
+    if sdr_email_creds and sdr_email_creds.get("provider") == "smtp":
+        try:
+            replies = check_imap_replies_for_profile(sdr_email_creds, lead_email, since)
+        except Exception as e:
+            logger.warning(f"IMAP reply check failed: {e}")
 
     return replies

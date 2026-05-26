@@ -10,9 +10,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter()
 
   useEffect(() => {
-    const theme = localStorage.getItem("theme")
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
-    document.documentElement.classList.toggle("dark", theme ? theme === "dark" : prefersDark)
+    document.documentElement.classList.add("dark")
 
     const token = localStorage.getItem("access_token")
     if (!token) {

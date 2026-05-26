@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import csv
+import io
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_
 from pydantic import BaseModel
 from typing import Optional
 
@@ -11,10 +14,72 @@ from app.utils.auth import get_current_user
 from app.services.lead_extraction.csv_importer import parse_csv
 from app.services.lead_extraction.apollo import search_leads
 from app.services.lead_extraction.web_scraper import scrape_and_create_lead
+from app.services.lead_extraction.lusha import enrich_lead as enrich_lusha
+from app.services.lead_extraction.rocketreach import enrich_lead as enrich_rocketreach
+from app.services.lead_extraction.google_places import search_places
 from app.services.ai.lead_scoring import score_lead
 from app.services.integrations.resolver import resolve_api_key
 
 router = APIRouter(prefix="/leads", tags=["leads"])
+
+
+SAMPLE_CSV_HEADERS = [
+    "first_name", "last_name", "email", "phone", "title", "company",
+    "linkedin_url", "website", "industry", "location", "city", "state",
+    "country", "company_size", "revenue", "products_services", "notes",
+]
+
+
+@router.get("/stats")
+async def leads_stats(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    all_leads = await db.execute(select(Lead).where(Lead.org_id == user.org_id))
+    leads = all_leads.scalars().all()
+    total = len(leads)
+    source_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = {}
+    scored = 0
+    for lead in leads:
+        src = lead.source or "unknown"
+        source_counts[src] = source_counts.get(src, 0) + 1
+        st = lead.status or "new"
+        status_counts[st] = status_counts.get(st, 0) + 1
+        if lead.score and lead.score > 0:
+            scored += 1
+    return {
+        "total": total,
+        "by_source": source_counts,
+        "by_status": status_counts,
+        "scored": scored,
+    }
+
+
+@router.get("/sample-csv")
+async def download_sample_csv():
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(SAMPLE_CSV_HEADERS)
+    writer.writerow([
+        "John", "Doe", "john@acmecorp.com", "+1-555-0100", "CTO",
+        "Acme Corp", "https://linkedin.com/in/johndoe", "https://acmecorp.com",
+        "Technology", "San Francisco, CA", "San Francisco", "California",
+        "United States", "51-200", "$10M-$50M", "Cloud software, APIs",
+        "Met at TechConf 2025",
+    ])
+    writer.writerow([
+        "Jane", "Smith", "jane@example.com", "+1-555-0200", "VP Engineering",
+        "Example Inc", "", "https://example.com", "Healthcare",
+        "New York, NY", "New York", "New York", "United States",
+        "201-500", "$50M-$100M", "HealthTech platform", "",
+    ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=leads_sample.csv"},
+    )
 
 
 class LeadCreate(BaseModel):
@@ -52,22 +117,50 @@ class LeadUpdate(BaseModel):
 async def list_leads(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-    page: int = 1,
-    per_page: int = 25,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(25, ge=1, le=100),
     search: Optional[str] = None,
+    source: Optional[str] = None,
+    status: Optional[str] = None,
+    min_score: Optional[int] = None,
+    industry: Optional[str] = None,
+    location: Optional[str] = None,
 ):
-    query = select(Lead).where(Lead.org_id == user.org_id).order_by(Lead.created_at.desc())
+    conditions = [Lead.org_id == user.org_id]
     if search:
-        query = query.where(
-            Lead.first_name.ilike(f"%{search}%") |
-            Lead.last_name.ilike(f"%{search}%") |
-            Lead.company.ilike(f"%{search}%") |
-            Lead.email.ilike(f"%{search}%")
+        conditions.append(
+            or_(
+                Lead.first_name.ilike(f"%{search}%"),
+                Lead.last_name.ilike(f"%{search}%"),
+                Lead.company.ilike(f"%{search}%"),
+                Lead.email.ilike(f"%{search}%"),
+                Lead.title.ilike(f"%{search}%"),
+                Lead.phone.ilike(f"%{search}%"),
+            )
         )
+    if source:
+        conditions.append(Lead.source == source)
+    if status:
+        conditions.append(Lead.status == status)
+    if min_score is not None:
+        conditions.append(Lead.score >= min_score)
+    if industry:
+        conditions.append(Lead.industry.ilike(f"%{industry}%"))
+    if location:
+        conditions.append(
+            or_(
+                Lead.location.ilike(f"%{location}%"),
+                Lead.city.ilike(f"%{location}%"),
+                Lead.state.ilike(f"%{location}%"),
+                Lead.country.ilike(f"%{location}%"),
+            )
+        )
+    query = select(Lead).where(and_(*conditions)).order_by(Lead.created_at.desc())
+    total_query = select(Lead).where(and_(*conditions))
+    total_result = await db.execute(total_query)
+    total = len(total_result.scalars().all())
     result = await db.execute(query.offset((page - 1) * per_page).limit(per_page))
     leads = result.scalars().all()
-    total_query = await db.execute(select(Lead).where(Lead.org_id == user.org_id))
-    total = len(total_query.scalars().all())
     return {"items": leads, "total": total, "page": page, "per_page": per_page}
 
 
@@ -276,3 +369,130 @@ async def scrape_batch(
 
     await db.flush()
     return {"results": results, "total": len(results), "imported": sum(1 for r in results if r["status"] == "imported")}
+
+
+@router.post("/enrich/lusha")
+async def enrich_with_lusha(
+    email: str = "",
+    phone: str = "",
+    first_name: str = "",
+    last_name: str = "",
+    company: str = "",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    api_key = await resolve_api_key(db, user.org_id, "lusha")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Lusha not configured. Add API key in Admin > Integrations.")
+    result = await enrich_lusha(
+        email=email or None,
+        phone=phone or None,
+        first_name=first_name or None,
+        last_name=last_name or None,
+        company=company or None,
+        api_key=api_key,
+    )
+    return result
+
+
+@router.post("/enrich/rocketreach")
+async def enrich_with_rocketreach(
+    email: str = "",
+    linkedin_url: str = "",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    api_key = await resolve_api_key(db, user.org_id, "rocketreach")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="RocketReach not configured. Add API key in Admin > Integrations.")
+    result = await enrich_rocketreach(
+        email=email or None,
+        linkedin_url=linkedin_url or None,
+        api_key=api_key,
+    )
+    return result
+
+
+@router.post("/enrich/lead/{lead_id}")
+async def enrich_single_lead(
+    lead_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(Lead).where(Lead.id == lead_id, Lead.org_id == user.org_id))
+    lead = result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    enriched = {}
+    lusha_key = await resolve_api_key(db, user.org_id, "lusha")
+    rr_key = await resolve_api_key(db, user.org_id, "rocketreach")
+
+    if lusha_key:
+        lusha_data = await enrich_lusha(
+            email=lead.email or None,
+            phone=lead.phone or None,
+            first_name=lead.first_name or None,
+            last_name=lead.last_name or None,
+            company=lead.company or None,
+            api_key=lusha_key,
+        )
+        if lusha_data.get("phone"):
+            enriched["phone"] = lusha_data["phone"]
+        if lusha_data.get("email") and not lead.email:
+            enriched["email"] = lusha_data["email"]
+        if not lead.title and lusha_data.get("title"):
+            enriched["title"] = lusha_data["title"]
+
+    if rr_key and not enriched.get("phone"):
+        rr_data = await enrich_rocketreach(
+            email=lead.email or None,
+            linkedin_url=lead.linkedin_url or None,
+            api_key=rr_key,
+        )
+        if rr_data.get("phone"):
+            enriched["phone"] = rr_data["phone"]
+        if rr_data.get("email") and not lead.email and not enriched.get("email"):
+            enriched["email"] = rr_data["email"]
+        if not lead.title and rr_data.get("title"):
+            enriched["title"] = rr_data["title"]
+
+    if enriched:
+        for key, val in enriched.items():
+            setattr(lead, key, val)
+        lead.source = lead.source or "enriched"
+        await db.flush()
+
+    return {"lead_id": lead.id, "enriched": enriched, "source": "lusha+rocketreach"}
+
+
+@router.get("/sources/google-places")
+async def fetch_from_google_places(
+    query: str = "",
+    location: str = "",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    api_key = await resolve_api_key(db, user.org_id, "google_places")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Google Places API not configured. Add API key in Admin > Integrations.")
+    if not query or not location:
+        raise HTTPException(status_code=400, detail="Both 'query' and 'location' parameters are required")
+
+    businesses = await search_places(query, location, api_key)
+    created = []
+    for biz in businesses:
+        if biz.get("name"):
+            existing = await db.execute(
+                select(Lead).where(
+                    Lead.company == biz["name"],
+                    Lead.org_id == user.org_id,
+                )
+            )
+            if existing.scalar_one_or_none():
+                continue
+        lead = Lead(org_id=user.org_id, **biz)
+        db.add(lead)
+        created.append(lead)
+    await db.flush()
+    return {"imported": len(created), "total_from_places": len(businesses)}

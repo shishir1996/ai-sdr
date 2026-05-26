@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_AI_API_KEY: str = ""
-    DEFAULT_AI_MODEL: str = "llama-3.1-8b"
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "deepseek/deepseek-v4-flash-free"
+    DEFAULT_AI_MODEL: str = "deepseek-v4-flash-free"
     AI_TOKEN_BUDGET_MONTHLY: int = 100000000
 
     # Gmail

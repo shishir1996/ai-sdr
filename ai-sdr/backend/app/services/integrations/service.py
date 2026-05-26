@@ -146,6 +146,11 @@ INTEGRATION_META = {
         "description": "Gemini 1.5 Pro and Flash models",
         "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "AIza..."}],
     },
+    "openrouter": {
+        "label": "OpenRouter",
+        "description": "Access 200+ models including DeepSeek, Claude, GPT, Gemini via one API — OpenAI-compatible",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "sk-or-v1-..."}],
+    },
     "gmail": {
         "label": "Gmail API",
         "description": "Send and track emails via Google Gmail",
@@ -154,10 +159,26 @@ INTEGRATION_META = {
             {"key": "api_secret", "label": "Client Secret", "type": "password", "placeholder": "GOCSPX-..."},
         ],
     },
+    "outlook": {
+        "label": "Outlook / Microsoft 365",
+        "description": "Send emails via Outlook / Microsoft 365 OAuth — each SDR connects their own mailbox",
+        "fields": [
+            {"key": "api_key", "label": "Client ID", "type": "text", "placeholder": "xxx-xxxx-xxxx-xxxx"},
+            {"key": "api_secret", "label": "Client Secret", "type": "password", "placeholder": "Client secret from Azure AD"},
+        ],
+    },
     "vapi": {
         "label": "VAPI.ai",
-        "description": "AI-powered phone calls",
+        "description": "AI-powered phone calls via Vapi — enter your API key, then configure AI model and voice in the Calling dashboard",
         "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "sk-..."}],
+    },
+    "twilio": {
+        "label": "Twilio",
+        "description": "Phone number infrastructure for AI calling — Vapi uses Twilio numbers to place calls",
+        "fields": [
+            {"key": "api_key", "label": "Account SID", "type": "text", "placeholder": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+            {"key": "api_secret", "label": "Auth Token", "type": "password", "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+        ],
     },
     "linkedin": {
         "label": "LinkedIn",
@@ -180,5 +201,38 @@ INTEGRATION_META = {
             {"key": "api_key", "label": "Access Key ID", "type": "text", "placeholder": "AKIA..."},
             {"key": "api_secret", "label": "Secret Access Key", "type": "password", "placeholder": "..."},
         ],
+    },
+    "lusha": {
+        "label": "Lusha",
+        "description": "B2B contact data enrichment — phone numbers, emails, and company info",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "Lusha API key"}],
+    },
+    "rocketreach": {
+        "label": "RocketReach",
+        "description": "Professional email and phone number lookup for leads",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "RocketReach API key"}],
+    },
+    "razorpay": {
+        "label": "Razorpay",
+        "description": "Payment link generation for collecting payments from leads",
+        "fields": [
+            {"key": "api_key", "label": "Key ID", "type": "text", "placeholder": "rzp_live_..."},
+            {"key": "api_secret", "label": "Key Secret", "type": "password", "placeholder": "..."},
+        ],
+    },
+    "calendly": {
+        "label": "Calendly",
+        "description": "Meeting scheduling — create booking links, check availability, and book meetings",
+        "fields": [{"key": "api_key", "label": "Personal Access Token", "type": "password", "placeholder": "Calendly PAT"}],
+    },
+    "cal_com": {
+        "label": "Cal.com",
+        "description": "Open-source scheduling — create booking links and manage availability",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "cal_..."}],
+    },
+    "google_places": {
+        "label": "Google Places API",
+        "description": "Replace Google Maps scraping with reliable Places API data (business name, address, phone, rating, reviews)",
+        "fields": [{"key": "api_key", "label": "API Key", "type": "password", "placeholder": "AIza..."}],
     },
 }

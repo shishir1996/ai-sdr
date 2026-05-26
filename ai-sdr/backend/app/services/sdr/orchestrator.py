@@ -12,11 +12,13 @@ from app.models.agent import SDRProfile, LeadState, AgentLog
 from app.models.lead import Lead
 from app.models.user import Organization
 from app.services.ai.model_client import generate_text
-from app.services.integrations.resolver import resolve_api_key
+from app.services.integrations.resolver import resolve_api_key, resolve_api_secret, resolve_refresh_token
 from app.services.sdr.auto_discovery import auto_discover_leads
 from app.services.lead_extraction.web_scraper import scrape_and_create_lead
 from app.services.sdr.rate_limiter import rate_limiter
-from app.services.email.reply_detector import check_for_replies as check_gmail_replies
+from app.services.email.reply_detector import check_email_replies
+from app.services.email.reply_handler import handle_reply
+from app.services.sdr.credentials import decrypt_sdr_credentials
 from app.services.sdr.tools import (
     research_lead_tool,
     send_email_tool,
@@ -234,16 +236,25 @@ async def _process_lead(db: AsyncSession, org_id: str, lead: Lead, profile: SDRP
 
     ai_key = await resolve_api_key(db, org_id, "together_ai")
 
-    # Check for email replies
+    # Check for email replies (Gmail OAuth + IMAP for SMTP)
     gmail_client_id = await resolve_api_key(db, org_id, "gmail")
     gmail_secret = await resolve_api_secret(db, org_id, "gmail")
     gmail_refresh = await resolve_refresh_token(db, org_id, "gmail")
-    if lead.email and gmail_client_id and gmail_refresh:
-        replies = check_gmail_replies(gmail_client_id, gmail_secret, gmail_refresh, lead.email, since=ls.last_contacted_at if ls else None)
+    sdr_email_creds = decrypt_sdr_credentials(profile.email_credentials_encrypted) if profile.email_credentials_encrypted else None
+    if lead.email:
+        replies = check_email_replies(
+            lead_email=lead.email,
+            since=ls.last_contacted_at if ls else None,
+            gmail_client_id=gmail_client_id,
+            gmail_secret=gmail_secret,
+            gmail_refresh=gmail_refresh,
+            sdr_email_creds=sdr_email_creds,
+        )
         for reply in replies:
-            await _log_action(db, org_id, lead.id, "reply_detected", "email", f"Lead replied: {reply['snippet'][:100]}", reply["snippet"], status="success")
-            await _update_lead_state(db, org_id, lead.id, "follow_up", "email")
-            logger.info(f"Email reply detected from {lead_data['name']}: {reply['subject']}")
+            logger.info(f"Email reply detected from {lead_data['name']}: {reply.get('subject', '')}")
+            result_text = await handle_reply(db, org_id, lead, lead_data, profile, reply, ai_key=ai_key)
+            await _log_action(db, org_id, lead.id, "reply_handled", "email", f"Contextual reply handled", result_text, status="success")
+            return
 
     # AI decides next action
     decision = await _decide_next_action(db, org_id, lead_data, state, profile, ai_key)
@@ -267,7 +278,7 @@ async def _process_lead(db: AsyncSession, org_id: str, lead: Lead, profile: SDRP
         await _update_lead_state(db, org_id, lead.id, "researched")
 
     elif action == "send_email" and lead.email:
-        allowed, remaining = rate_limiter.check_email(org_id, profile.max_daily_emails)
+        allowed, remaining = await rate_limiter.check_email(org_id, profile.max_daily_emails)
         if not allowed:
             await _log_action(db, org_id, lead.id, "send_email", "email", f"Rate limit exceeded ({remaining} remaining today)", "Skipped", status="skipped")
         else:
@@ -283,7 +294,7 @@ async def _process_lead(db: AsyncSession, org_id: str, lead: Lead, profile: SDRP
         elif not lead_data.get("linkedin_url"):
             await _log_action(db, org_id, lead.id, "send_linkedin", "linkedin", "No LinkedIn URL", "Skipped", status="skipped")
         else:
-            allowed, remaining = rate_limiter.check_linkedin(org_id, profile.max_daily_linkedin)
+            allowed, remaining = await rate_limiter.check_linkedin(org_id, profile.max_daily_linkedin)
             if not allowed:
                 await _log_action(db, org_id, lead.id, "send_linkedin", "linkedin", f"Rate limit exceeded ({remaining} remaining today)", "Skipped", status="skipped")
             else:
@@ -295,7 +306,7 @@ async def _process_lead(db: AsyncSession, org_id: str, lead: Lead, profile: SDRP
                 await _update_lead_state(db, org_id, lead.id, "contacted_linkedin", "linkedin")
 
     elif action == "make_call" and lead.phone:
-        allowed, remaining = rate_limiter.check_call(org_id, profile.max_daily_calls)
+        allowed, remaining = await rate_limiter.check_call(org_id, profile.max_daily_calls)
         if not allowed:
             await _log_action(db, org_id, lead.id, "make_call", "phone", f"Rate limit exceeded ({remaining} remaining today)", "Skipped", status="skipped")
         else:
@@ -307,13 +318,13 @@ async def _process_lead(db: AsyncSession, org_id: str, lead: Lead, profile: SDRP
 
     elif action == "send_payment" and profile.payment_link:
         await _log_action(db, org_id, lead.id, "send_payment", "email", reasoning, "Sending payment link...")
-        result_text = await send_payment_tool(lead_data, profile)
+        result_text = await send_payment_tool(db, org_id, lead_data, profile)
         await _log_action(db, org_id, lead.id, "payment_sent", "email", reasoning, result_text)
         await _update_lead_state(db, org_id, lead.id, "payment_sent")
 
     elif action == "schedule_meeting" and profile.calendar_link:
         await _log_action(db, org_id, lead.id, "schedule_meeting", "email", reasoning, "Sending calendar invite...")
-        result_text = await schedule_meeting_tool(lead_data, profile)
+        result_text = await schedule_meeting_tool(db, org_id, lead_data, profile)
         await _log_action(db, org_id, lead.id, "meeting_scheduled", "email", reasoning, result_text)
         await _update_lead_state(db, org_id, lead.id, "meeting_scheduled")
 

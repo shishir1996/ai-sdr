@@ -95,6 +95,10 @@ class WebhookPayload(BaseModel):
     subject: str = ""
     snippet: str = ""
     message_id: str = ""
+    rfc_message_id: str = ""
+    in_reply_to: str = ""
+    references: str = ""
+    thread_id: str = ""
 
 
 @router.post("/webhook/reply")
@@ -109,11 +113,41 @@ async def email_reply_webhook(
     if not lead:
         return {"status": "ignored", "reason": "lead not found"}
 
-    from app.services.sdr.orchestrator import _log_action, _update_lead_state
-    await _log_action(db, lead.org_id, lead.id, "reply_detected", "email", f"Webhook reply: {body.snippet[:100]}", body.snippet, status="success")
-    await _update_lead_state(db, lead.org_id, lead.id, "follow_up", "email")
+    from sqlalchemy import select
+    from app.models.agent import SDRProfile
+
+    profile_result = await db.execute(
+        select(SDRProfile).where(SDRProfile.org_id == lead.org_id).limit(1)
+    )
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        return {"status": "ignored", "reason": "no SDR profile for org"}
+
+    reply_data = {
+        "message_id": body.message_id,
+        "rfc_message_id": body.rfc_message_id or body.message_id,
+        "in_reply_to": body.in_reply_to,
+        "references": body.references,
+        "thread_id": body.thread_id,
+        "subject": body.subject,
+        "snippet": body.snippet,
+        "from": body.lead_email,
+    }
+
+    lead_data = {
+        "id": lead.id,
+        "name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
+        "title": lead.title or "",
+        "company": lead.company or "",
+        "email": lead.email or "",
+    }
+
+    from app.services.email.reply_handler import handle_reply
+    from app.services.integrations.resolver import resolve_api_key
+    ai_key = await resolve_api_key(db, lead.org_id, "together_ai")
+    result_text = await handle_reply(db, lead.org_id, lead, lead_data, profile, reply_data, ai_key=ai_key)
     await db.commit()
-    return {"status": "processed"}
+    return {"status": "processed", "result": result_text}
 
 
 class OAuthCallbackRequest(BaseModel):

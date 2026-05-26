@@ -3,21 +3,6 @@ from app.config import get_settings
 
 settings = get_settings()
 
-_client: Optional[object] = None
-_current_key: Optional[str] = None
-
-
-def get_client(api_key_override: Optional[str] = None):
-    global _client, _current_key
-    key = api_key_override or settings.TOGETHER_API_KEY
-    if not key:
-        raise ValueError("Together AI API key not configured. Set it in Admin > Integrations.")
-    if _client is None or key != _current_key:
-        from together import Together
-        _client = Together(api_key=key)
-        _current_key = key
-    return _client
-
 
 def generate_text(
     system_prompt: str,
@@ -26,14 +11,97 @@ def generate_text(
     temperature: float = 0.7,
     api_key: Optional[str] = None,
 ) -> str:
-    client = get_client(api_key)
+    key = api_key
+    model = settings.TOGETHER_MODEL
+
+    if key:
+        provider = _detect_provider(key)
+    elif settings.OPENROUTER_API_KEY:
+        key = settings.OPENROUTER_API_KEY
+        model = settings.OPENROUTER_MODEL
+        provider = "openrouter"
+    elif settings.TOGETHER_API_KEY:
+        key = settings.TOGETHER_API_KEY
+        provider = "together"
+    elif settings.OPENAI_API_KEY:
+        key = settings.OPENAI_API_KEY
+        model = "gpt-4o-mini"
+        provider = "openai"
+    else:
+        raise ValueError("No AI provider configured. Add an API key in Admin > Integrations.")
+
+    if provider == "openrouter":
+        return _openrouter_completion(key, model, system_prompt, user_prompt, max_tokens, temperature)
+    elif provider == "together":
+        return _together_completion(key, model, system_prompt, user_prompt, max_tokens, temperature)
+    elif provider == "openai":
+        return _openai_completion(key, model, system_prompt, user_prompt, max_tokens, temperature)
+    else:
+        return _together_completion(key, model, system_prompt, user_prompt, max_tokens, temperature)
+
+
+def _detect_provider(api_key: str) -> str:
+    if api_key.startswith("sk-or-"):
+        return "openrouter"
+    if api_key.startswith("sk-"):
+        return "openai"
+    if api_key.startswith("tgp_") or api_key.startswith("tgp-"):
+        return "together"
+    return "together"
+
+
+def _together_completion(
+    key: str, model: str, system: str, user: str,
+    max_tokens: int, temperature: float,
+) -> str:
+    from together import Together
+    client = Together(api_key=key)
     response = client.chat.completions.create(
-        model=settings.TOGETHER_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tokens,
         temperature=temperature,
     )
     return response.choices[0].message.content.strip()
+
+
+def _openai_completion(
+    key: str, model: str, system: str, user: str,
+    max_tokens: int, temperature: float,
+) -> str:
+    from openai import OpenAI
+    client = OpenAI(api_key=key)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    return response.choices[0].message.content.strip()
+
+
+def _openrouter_completion(
+    key: str, model: str, system: str, user: str,
+    max_tokens: int, temperature: float,
+) -> str:
+    import httpx
+    resp = httpx.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://app.offdx.in",
+            "X-Title": "AI SDR",
+        },
+        json={
+            "model": model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        },
+        timeout=60,
+    )
+    data = resp.json()
+    if "error" in data:
+        raise ValueError(f"OpenRouter error: {data['error'].get('message', str(data['error']))}")
+    return data["choices"][0]["message"]["content"].strip()

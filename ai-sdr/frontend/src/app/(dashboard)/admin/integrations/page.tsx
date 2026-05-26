@@ -21,7 +21,7 @@ interface Integration {
   has_refresh_token: boolean
 }
 
-const AI_PROVIDERS = ["together_ai", "openai", "anthropic", "google_ai"]
+const AI_PROVIDERS = ["together_ai", "openai", "anthropic", "google_ai", "openrouter"]
 
 export default function IntegrationsPage() {
   const [providers, setProviders] = useState<ProviderMeta[]>([])
@@ -239,6 +239,7 @@ export default function IntegrationsPage() {
                   </div>
 
                   {provider.provider === "gmail" && <GmailSetupGuide />}
+                  {provider.provider === "outlook" && <OutlookSetupGuide />}
 
                   <div className="flex items-center justify-end mt-4 gap-2">
                     {isSavedNotif && (
@@ -246,6 +247,9 @@ export default function IntegrationsPage() {
                     )}
                     {provider.provider === "gmail" && isSaved && (
                       <GmailConnectButton hasRefreshToken={integration?.has_refresh_token || false} />
+                    )}
+                    {provider.provider === "outlook" && isSaved && (
+                      <OutlookConnectButton />
                     )}
                     <button
                       onClick={() => handleSave(provider.provider)}
@@ -303,6 +307,63 @@ function GmailSetupGuide() {
         </div>
       )}
     </div>
+  )
+}
+
+function OutlookSetupGuide() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="mt-4 border rounded-lg">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 w-full px-4 py-2 text-left text-sm font-medium hover:bg-muted/50 transition-colors"
+      >
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        How to get Outlook / Microsoft 365 API credentials
+      </button>
+      {open && (
+        <div className="px-4 pb-4 text-sm text-muted-foreground space-y-2 border-t pt-3">
+          <ol className="list-decimal list-inside space-y-1.5">
+            <li>Go to <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Azure Portal</a> → <strong>App Registrations</strong></li>
+            <li>Click <strong>New Registration</strong>, name it "AI SDR"</li>
+            <li>Supported account types: <strong>Accounts in any organizational directory and personal Microsoft accounts</strong></li>
+            <li>Redirect URI (dev): Web → <code className="bg-muted px-1 py-0.5 rounded text-xs">http://localhost:8000/api/v1/email/sdr-outlook-oauth-callback/{'{'}sdr_profile_id{'}'}</code></li>
+            <li>Redirect URI (prod): Web → <code className="bg-muted px-1 py-0.5 rounded text-xs">https://api.offdx.in/api/v1/email/sdr-outlook-oauth-callback/{'{'}sdr_profile_id{'}'}</code></li>
+            <li>After creation, copy the <strong>Application (Client) ID</strong> → this is your <strong>Client ID</strong></li>
+            <li>Go to <strong>Certificates & Secrets</strong> → <strong>New Client Secret</strong> → copy the value → this is your <strong>Client Secret</strong></li>
+            <li>Go to <strong>API Permissions</strong> → Add permission → <strong>Microsoft Graph</strong> → <strong>Delegated Permissions</strong></li>
+            <li>Add: <code className="bg-muted px-1 py-0.5 rounded text-xs">Mail.Send</code>, <code className="bg-muted px-1 py-0.5 rounded text-xs">Mail.Read</code>, <code className="bg-muted px-1 py-0.5 rounded text-xs">User.Read</code>, <code className="bg-muted px-1 py-0.5 rounded text-xs">offline_access</code></li>
+            <li>Click <strong>Grant Admin Consent</strong> (requires admin privileges)</li>
+            <li>Enter the <strong>Client ID</strong> and <strong>Client Secret</strong> above, then each SDR connects their own Outlook via the SDR wizard</li>
+          </ol>
+          <p className="text-xs mt-2">
+            Each SDR profile uses its own redirect URI. Add as many redirect URIs as SDRs you need, or use a single generic URI pattern.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OutlookConnectButton() {
+  const [connecting, setConnecting] = useState(false)
+
+  const startOAuth = async () => {
+    setConnecting(true)
+    try {
+      alert("Outlook OAuth for the global account is configured via the SDR wizard. Each SDR connects their own Outlook mailbox individually.")
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  return (
+    <button onClick={startOAuth} className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+      <ExternalLink size={14} /> Per-SDR via SDR Wizard
+    </button>
   )
 }
 

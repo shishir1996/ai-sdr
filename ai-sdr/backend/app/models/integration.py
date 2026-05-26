@@ -16,15 +16,14 @@ def generate_uuid():
 
 
 INTEGRATION_PROVIDERS = [
-    "together_ai",
-    "openai",
-    "anthropic",
-    "google_ai",
-    "gmail",
-    "vapi",
-    "apollo",
-    "linkedin",
+    "together_ai", "openai", "anthropic", "google_ai", "openrouter",
+    "gmail", "outlook",
+    "vapi", "twilio",
+    "apollo", "linkedin", "lusha", "rocketreach",
     "aws",
+    "razorpay",
+    "calendly", "cal_com",
+    "google_places",
 ]
 
 

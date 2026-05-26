@@ -1,4 +1,10 @@
+"use client"
+import { useEffect } from "react"
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    document.documentElement.classList.add("dark")
+  }, [])
   return (
     <div className="min-h-screen bg-[hsl(224,45%,4%)] relative overflow-hidden">
       {/* Animated background mesh */}

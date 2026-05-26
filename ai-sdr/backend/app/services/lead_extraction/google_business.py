@@ -44,7 +44,16 @@ BUSINESS_CATEGORIES = [
 ]
 
 
-async def search_google_maps(query: str, location: str) -> list[dict]:
+async def search_google_maps(query: str, location: str, api_key: str = "") -> list[dict]:
+    if api_key:
+        try:
+            from app.services.lead_extraction.google_places import search_places
+            results = await search_places(query, location, api_key)
+            if results:
+                return results
+        except Exception as e:
+            logger.warning("Google Places API failed, falling back to Playwright: %s", e)
+
     if not HAS_PLAYWRIGHT:
         logger.error("Playwright not available for Google Maps scraping")
         return []

@@ -5,7 +5,7 @@ from app.config import get_settings
 settings = get_settings()
 
 
-AiProvider = Literal["openai", "claude", "gemini", "together"]
+AiProvider = Literal["openai", "claude", "gemini", "together", "openrouter"]
 
 
 @dataclass
@@ -29,9 +29,12 @@ AVAILABLE_MODELS: dict[str, AiModel] = {
     "llama-3.1-8b": AiModel("together", "meta-llama/Llama-3.1-8B-Instruct", "Llama 3.1 8B", 8192, 0.0002, 0.0002),
     "llama-3.1-70b": AiModel("together", "meta-llama/Llama-3.1-70B-Instruct", "Llama 3.1 70B", 8192, 0.0009, 0.0009),
     "mixtral-8x7b": AiModel("together", "mistralai/Mixtral-8x7B-Instruct-v0.1", "Mixtral 8x7B", 32768, 0.0006, 0.0006),
+    "deepseek-v4-flash-free": AiModel("openrouter", "deepseek/deepseek-v4-flash-free", "DeepSeek V4 Flash Free", 65536, 0.0, 0.0),
+    "deepseek-v3": AiModel("openrouter", "deepseek/deepseek-chat", "DeepSeek V3", 65536, 0.0, 0.0),
+    "openrouter-auto": AiModel("openrouter", "openrouter/auto", "OpenRouter Auto", 128000, 0.0, 0.0),
 }
 
-DEFAULT_MODEL = "llama-3.1-8b"
+DEFAULT_MODEL = "deepseek-v4-flash-free"
 
 
 def get_model(model_id: str) -> AiModel:
@@ -56,17 +59,15 @@ async def generate_text(
         return await _claude_generate(system_prompt, user_prompt, model, max_tokens, temperature, api_key)
     elif model.provider == "gemini":
         return await _gemini_generate(system_prompt, user_prompt, model, max_tokens, temperature, api_key)
+    elif model.provider == "openrouter":
+        return await _openrouter_generate(system_prompt, user_prompt, model, max_tokens, temperature, api_key)
     else:
         raise ValueError(f"Unsupported provider: {model.provider}")
 
 
 async def _together_generate(
-    system_prompt: str,
-    user_prompt: str,
-    model: AiModel,
-    max_tokens: int,
-    temperature: float,
-    api_key: Optional[str],
+    system_prompt: str, user_prompt: str, model: AiModel,
+    max_tokens: int, temperature: float, api_key: Optional[str],
 ) -> str:
     from together import Together
     key = api_key or settings.TOGETHER_API_KEY
@@ -86,12 +87,8 @@ async def _together_generate(
 
 
 async def _openai_generate(
-    system_prompt: str,
-    user_prompt: str,
-    model: AiModel,
-    max_tokens: int,
-    temperature: float,
-    api_key: Optional[str],
+    system_prompt: str, user_prompt: str, model: AiModel,
+    max_tokens: int, temperature: float, api_key: Optional[str],
 ) -> str:
     from openai import OpenAI
     key = api_key or settings.OPENAI_API_KEY
@@ -111,12 +108,8 @@ async def _openai_generate(
 
 
 async def _claude_generate(
-    system_prompt: str,
-    user_prompt: str,
-    model: AiModel,
-    max_tokens: int,
-    temperature: float,
-    api_key: Optional[str],
+    system_prompt: str, user_prompt: str, model: AiModel,
+    max_tokens: int, temperature: float, api_key: Optional[str],
 ) -> str:
     import anthropic
     key = api_key or settings.ANTHROPIC_API_KEY
@@ -134,12 +127,8 @@ async def _claude_generate(
 
 
 async def _gemini_generate(
-    system_prompt: str,
-    user_prompt: str,
-    model: AiModel,
-    max_tokens: int,
-    temperature: float,
-    api_key: Optional[str],
+    system_prompt: str, user_prompt: str, model: AiModel,
+    max_tokens: int, temperature: float, api_key: Optional[str],
 ) -> str:
     import google.generativeai as genai
     key = api_key or settings.GOOGLE_AI_API_KEY
@@ -156,3 +145,38 @@ async def _gemini_generate(
     )
     response = gen_model.generate_content(user_prompt)
     return response.text.strip()
+
+
+async def _openrouter_generate(
+    system_prompt: str, user_prompt: str, model: AiModel,
+    max_tokens: int, temperature: float, api_key: Optional[str],
+) -> str:
+    import httpx
+    key = api_key or settings.OPENROUTER_API_KEY
+    if not key:
+        raise ValueError("OpenRouter API key not configured. Add it in Admin > Integrations.")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://app.offdx.in",
+                "X-Title": "AI SDR",
+            },
+            json={
+                "model": model.model_id,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+            timeout=60,
+        )
+        data = resp.json()
+        if "error" in data:
+            raise ValueError(f"OpenRouter API error: {data['error'].get('message', str(data['error']))}")
+        return data["choices"][0]["message"]["content"].strip()

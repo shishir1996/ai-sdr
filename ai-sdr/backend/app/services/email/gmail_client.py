@@ -33,10 +33,19 @@ def get_credentials_from_tokens(
     return creds
 
 
-def create_email(to: str, subject: str, body_html: str) -> dict[str, Any]:
+def create_email(
+    to: str,
+    subject: str,
+    body_html: str,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
+) -> dict[str, Any]:
     message = MIMEText(body_html, "html")
     message["to"] = to
     message["subject"] = subject
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+        message["References"] = references or in_reply_to
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     return {"raw": raw}
 
@@ -48,6 +57,9 @@ def send_email(
     client_id: Optional[str] = None,
     client_secret: Optional[str] = None,
     refresh_token: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     if not client_id or not refresh_token:
         return {"status": "error", "error": "Gmail not fully configured. Complete OAuth flow in Integrations."}
@@ -57,9 +69,12 @@ def send_email(
         if not creds:
             return {"status": "error", "error": "Failed to create Gmail credentials"}
         service = _build_service(creds)
-        message = create_email(to, subject, body_html)
-        sent = service.users().messages().send(userId="me", body=message).execute()
-        return {"message_id": sent["id"], "status": "sent"}
+        message = create_email(to, subject, body_html, in_reply_to=in_reply_to, references=references)
+        body = message
+        if thread_id:
+            body["threadId"] = thread_id
+        sent = service.users().messages().send(userId="me", body=body).execute()
+        return {"message_id": sent["id"], "thread_id": sent.get("threadId", ""), "status": "sent"}
     except HttpError as error:
         return {"status": "error", "error": str(error)}
 

@@ -39,7 +39,7 @@ class SDRProfile(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     org_id = Column(String, ForeignKey("organizations.id"), nullable=False)
 
-    # SDR Identity (for multi-SDR)
+    # SDR Identity
     name = Column(String(255), nullable=False, default="AI SDR")
     region = Column(String(255), nullable=True)
 
@@ -51,17 +51,17 @@ class SDRProfile(Base):
     service_description = Column(Text, nullable=True)
     calendar_link = Column(String(500), nullable=True)
 
-    # Who to sell to (ICP)
+    # ICP
     target_titles = Column(Text, nullable=True)
     target_industries = Column(Text, nullable=True)
     target_locations = Column(Text, nullable=True)
     target_company_size_min = Column(Integer, nullable=True)
     target_company_size_max = Column(Integer, nullable=True)
 
-    # Lead sources to work on
+    # Lead sources
     lead_sources = Column(Text, nullable=True)
 
-    # How to sell
+    # Outreach settings
     sdr_personality = Column(Text, nullable=True)
     outreach_tone = Column(String(50), default="professional")
     max_daily_emails = Column(Integer, default=20)
@@ -76,14 +76,26 @@ class SDRProfile(Base):
     linkedin_engagement_feed = Column(Text, nullable=True)
     web_scrape_targets = Column(Text, nullable=True)
 
-    # Auto-scrape config
+    # Auto-scrape
     auto_scrape_enabled = Column(Boolean, default=False)
     scrape_business_category = Column(String(255), nullable=True)
     scrape_country = Column(String(100), nullable=True)
     scrape_directory_urls = Column(Text, nullable=True)
 
-    # Campaign sequence (multi-step)
+    # Campaign sequence
     campaign_sequence = Column(Text, nullable=True)
+
+    # ============================================================
+    # Per-SDR Credentials (encrypted JSON blobs)
+    # ============================================================
+    # Email credentials
+    # For Gmail: {"provider":"gmail","client_id":"...","client_secret":"...","refresh_token":"...","sender_email":"...","sender_name":"..."}
+    # For SMTP:  {"provider":"smtp","host":"...","port":587,"username":"...","password":"...","sender_email":"...","sender_name":"..."}
+    email_credentials_encrypted = Column(Text, nullable=True)
+
+    # LinkedIn credentials: {"email":"...","password":"..."}
+    linkedin_credentials_encrypted = Column(Text, nullable=True)
+    # ============================================================
 
     # Status
     is_active = Column(Boolean, default=False)

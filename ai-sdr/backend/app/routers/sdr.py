@@ -2,7 +2,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
 
 from app.database import get_db
@@ -10,6 +10,11 @@ from app.models.user import User
 from app.models.agent import SDRProfile, LeadState, AgentLog
 from app.models.lead import Lead
 from app.utils.auth import get_current_user
+from app.utils.crypto import encrypt_value, decrypt_value
+from app.services.sdr.credentials import (
+    encrypt_sdr_credentials, decrypt_sdr_credentials,
+    has_email_configured, has_linkedin_configured, get_email_sender,
+)
 
 router = APIRouter(prefix="/sdr", tags=["sdr"])
 
@@ -49,6 +54,11 @@ def serialize_sdr(profile: SDRProfile) -> dict:
         "scrape_country": profile.scrape_country or "",
         "scrape_directory_urls": profile.scrape_directory_urls or "",
         "campaign_sequence": profile.campaign_sequence or "",
+        # Credential status (never expose actual creds to frontend)
+        "has_email": has_email_configured(profile.email_credentials_encrypted),
+        "email_sender": get_email_sender(profile.email_credentials_encrypted) or "",
+        "email_provider": (decrypt_sdr_credentials(profile.email_credentials_encrypted) or {}).get("provider", "") if profile.email_credentials_encrypted else "",
+        "has_linkedin": has_linkedin_configured(profile.linkedin_credentials_encrypted),
         "is_active": bool(profile.is_active),
         "leads_target": profile.leads_target or 100,
         "created_at": profile.created_at.isoformat() if profile.created_at else "",
@@ -164,6 +174,214 @@ async def delete_sdr_profile(
     return {"status": "deleted"}
 
 
+# ============================================================
+# Per-SDR Credential Management
+# ============================================================
+
+class EmailCredentialsSave(BaseModel):
+    provider: str = "smtp"
+    # Gmail fields
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    refresh_token: Optional[str] = None
+    # SMTP fields
+    host: Optional[str] = None
+    port: Optional[int] = 587
+    username: Optional[str] = None
+    password: Optional[str] = None
+    use_tls: bool = True
+    use_ssl: bool = False
+    # IMAP fields (for incoming reply detection)
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = 993
+    imap_use_ssl: bool = True
+    imap_username: Optional[str] = None
+    imap_password: Optional[str] = None
+    # Common
+    sender_email: str
+    sender_name: str = "AI SDR"
+
+
+class LinkedInCredentialsSave(BaseModel):
+    email: str
+    password: str
+
+
+@router.put("/profiles/{profile_id}/email-creds")
+async def save_sdr_email_creds(
+    profile_id: str,
+    body: EmailCredentialsSave,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+
+    creds = {"provider": body.provider, "sender_email": body.sender_email, "sender_name": body.sender_name}
+    if body.provider == "gmail":
+        creds["client_id"] = body.client_id
+        creds["client_secret"] = body.client_secret
+        creds["refresh_token"] = body.refresh_token
+    else:
+        creds["host"] = body.host
+        creds["port"] = body.port
+        creds["username"] = body.username
+        creds["password"] = body.password
+        creds["use_tls"] = body.use_tls
+        creds["use_ssl"] = body.use_ssl
+        creds["imap_host"] = body.imap_host
+        creds["imap_port"] = body.imap_port
+        creds["imap_use_ssl"] = body.imap_use_ssl
+        creds["imap_username"] = body.imap_username or body.username
+        creds["imap_password"] = body.imap_password or body.password
+
+    profile.email_credentials_encrypted = encrypt_sdr_credentials(creds)
+    await db.flush()
+    return {"status": "saved", "sender_email": body.sender_email, "provider": body.provider}
+
+
+@router.put("/profiles/{profile_id}/linkedin-creds")
+async def save_sdr_linkedin_creds(
+    profile_id: str,
+    body: LinkedInCredentialsSave,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+
+    creds = {"email": body.email, "password": body.password}
+    profile.linkedin_credentials_encrypted = encrypt_sdr_credentials(creds)
+    await db.flush()
+    return {"status": "saved", "account_email": body.email}
+
+
+@router.delete("/profiles/{profile_id}/email-creds")
+async def delete_sdr_email_creds(
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+    profile.email_credentials_encrypted = None
+    await db.flush()
+    return {"status": "deleted"}
+
+
+@router.delete("/profiles/{profile_id}/linkedin-creds")
+async def delete_sdr_linkedin_creds(
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+    profile.linkedin_credentials_encrypted = None
+    await db.flush()
+    return {"status": "deleted"}
+
+
+# Test email config
+class TestEmailSend(BaseModel):
+    to_email: str
+    subject: str = "Test email from AI SDR"
+    body_html: str = "<h2>Test</h2><p>If you receive this, email is configured correctly.</p>"
+
+
+@router.post("/profiles/{profile_id}/test-email")
+async def test_sdr_email(
+    profile_id: str,
+    body: TestEmailSend,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+
+    creds = decrypt_sdr_credentials(profile.email_credentials_encrypted)
+    if not creds:
+        raise HTTPException(status_code=400, detail="No email credentials configured for this SDR")
+
+    if creds.get("provider") == "gmail":
+        from app.services.email.gmail_client import send_email as gmail_send
+        result = gmail_send(
+            to=body.to_email,
+            subject=body.subject,
+            body_html=body.body_html,
+            client_id=creds.get("client_id"),
+            client_secret=creds.get("client_secret"),
+            refresh_token=creds.get("refresh_token"),
+        )
+        return result or {"status": "error", "error": "Gmail send failed"}
+    else:
+        from app.services.email.smtp_service import SMTPSender
+        from app.models.smtp import SMTPConfig
+        import uuid
+        test_config = SMTPConfig(
+            id=str(uuid.uuid4()),
+            org_id=user.org_id,
+            host=creds.get("host", ""),
+            port=creds.get("port", 587),
+            use_tls=creds.get("use_tls", True),
+            use_ssl=creds.get("use_ssl", False),
+            username=creds.get("username", ""),
+            password_encrypted=encrypt_value(creds.get("password", "")),
+            sender_name=creds.get("sender_name", "AI SDR"),
+            sender_email=creds.get("sender_email", ""),
+            is_active=False,
+        )
+        sender = SMTPSender(test_config)
+        return await sender.send(body.to_email, body.subject, body.body_html)
+
+
+# Test LinkedIn config
+@router.post("/profiles/{profile_id}/test-linkedin")
+async def test_sdr_linkedin(
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+
+    creds = decrypt_sdr_credentials(profile.linkedin_credentials_encrypted)
+    if not creds:
+        raise HTTPException(status_code=400, detail="No LinkedIn credentials configured for this SDR")
+
+    from app.services.linkedin.linkedin_client import login_and_save_cookies
+    success = await login_and_save_cookies(
+        email=creds.get("email", ""),
+        password=creds.get("password", ""),
+        headless=True,
+    )
+    return {"status": "connected" if success else "failed"}
+
+
 @router.post("/profiles/{profile_id}/activate")
 async def activate_sdr(
     profile_id: str,
@@ -250,7 +468,6 @@ async def get_all_lead_states(
         leads_result = await db.execute(select(Lead).where(Lead.id.in_(lead_ids)))
         for lead in leads_result.scalars().all():
             leads_by_id[lead.id] = lead
-
     return [
         {
             "lead_id": s.lead_id,
@@ -269,16 +486,30 @@ async def get_all_lead_states(
     ]
 
 
+@router.get("/leads/progress")
+async def get_lead_progress(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(LeadState).where(LeadState.org_id == user.org_id))
+    states = result.scalars().all()
+    progress: dict[str, int] = {}
+    for s in states:
+        state_key = s.state or "unknown"
+        progress[state_key] = progress.get(state_key, 0) + 1
+    return progress
+
+
 @router.get("/rate-limits")
 async def get_rate_limits(user: User = Depends(get_current_user)):
     from app.services.sdr.rate_limiter import rate_limiter
-    return rate_limiter.get_usage(user.org_id)
+    return await rate_limiter.get_usage(user.org_id)
 
 
 @router.post("/rate-limits/reset")
 async def reset_rate_limits(user: User = Depends(get_current_user)):
     from app.services.sdr.rate_limiter import rate_limiter
-    rate_limiter.reset_org(user.org_id)
+    await rate_limiter.reset_org(user.org_id)
     return {"status": "reset"}
 
 

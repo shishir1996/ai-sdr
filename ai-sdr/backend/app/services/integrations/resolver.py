@@ -8,6 +8,7 @@ FALLBACK_KEYS: dict[str, str] = {
     "together_ai": settings.TOGETHER_API_KEY,
     "apollo": settings.APOLLO_API_KEY,
     "vapi": settings.VAPI_API_KEY,
+    "openrouter": settings.OPENROUTER_API_KEY,
 }
 
 
@@ -30,3 +31,19 @@ async def resolve_refresh_token(db: AsyncSession, org_id: str, provider: str) ->
     if integration and integration.refresh_token_encrypted:
         return decrypt_value(integration.refresh_token_encrypted) or ""
     return ""
+
+
+def get_google_oauth_flow(client_id: str, redirect_uri: str, scopes: list[str]):
+    from google_auth_oauthlib.flow import Flow
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": client_id,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        },
+        scopes=scopes,
+        redirect_uri=redirect_uri,
+    )
+    return flow

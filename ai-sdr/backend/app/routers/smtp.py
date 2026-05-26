@@ -11,6 +11,8 @@ from app.utils.auth import get_current_admin
 from app.utils.crypto import encrypt_value, decrypt_value
 from app.services.email.smtp_service import send_email_via_smtp, SMTP_PROVIDERS, SMTP_WARNINGS, get_dns_guide
 from app.services.email.smtp_service import get_active_smtp_config
+from app.services.email.dns_service import check_all as check_dns_all
+from app.services.email.imap_client import IMAP_PROVIDERS, API_ONLY_PROVIDERS, test_imap_connection
 
 router = APIRouter(prefix="/smtp", tags=["smtp"])
 
@@ -240,6 +242,57 @@ async def list_smtp_providers():
     ]
 
 
+class ImapTestRequest(BaseModel):
+    host: str
+    port: int = 993
+    use_ssl: bool = True
+    username: str
+    password: str
+
+
+@router.post("/test-imap")
+async def test_imap(
+    body: ImapTestRequest,
+    user: User = Depends(get_current_admin),
+):
+    result = test_imap_connection(
+        host=body.host,
+        port=body.port,
+        use_ssl=body.use_ssl,
+        username=body.username,
+        password=body.password,
+    )
+    return result
+
+
+@router.get("/imap-providers")
+async def list_imap_providers():
+    return [
+        {
+            "id": key,
+            "name": key.capitalize(),
+            "config": value,
+            "imap_only": False,
+        }
+        for key, value in IMAP_PROVIDERS.items()
+    ] + [
+        {
+            "id": key,
+            "name": key.capitalize(),
+            "config": None,
+            "imap_only": False,
+            "warning": "API-only provider, no IMAP inbox access available",
+        }
+        for key in API_ONLY_PROVIDERS
+    ]
+
+
 @router.get("/dns-guide")
-async def dns_guide():
-    return get_dns_guide("offdx.in")
+async def dns_guide(domain: str = "offdx.in"):
+    return get_dns_guide(domain)
+
+
+@router.get("/dns-check")
+async def dns_check(domain: str = "offdx.in", dkim_selector: str = "default"):
+    result = await check_dns_all(domain, dkim_selector)
+    return result

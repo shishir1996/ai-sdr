@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { api } from "@/lib/api-client"
 
 interface FeatureFlag {
   key: string
@@ -29,8 +30,7 @@ export default function FeatureFlagsPage() {
 
   const fetchFlags = async () => {
     try {
-      const res = await fetch("/api/v1/admin/feature-flags")
-      const data = await res.json()
+      const data = await api.get<FeatureFlag[]>("/admin/feature-flags")
       setFlags(data)
     } catch (err) {
       console.error("Failed to fetch flags", err)
@@ -41,11 +41,7 @@ export default function FeatureFlagsPage() {
 
   const toggleFlag = async (key: string, enabled: boolean) => {
     try {
-      await fetch(`/api/v1/admin/feature-flags/${key}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      })
+      await api.put(`/admin/feature-flags/${key}`, { enabled })
       setFlags((prev) => prev.map((f) => (f.key === key ? { ...f, enabled } : f)))
     } catch (err) {
       console.error("Failed to update flag", err)

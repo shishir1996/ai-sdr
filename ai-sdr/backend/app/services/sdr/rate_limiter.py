@@ -1,51 +1,33 @@
-import time
-from collections import defaultdict
 from typing import Optional
+from app.services.redis_service import redis_service
 
 
 class RateLimiter:
-    def __init__(self):
-        self._email_counts: dict[str, list[float]] = defaultdict(list)
-        self._call_counts: dict[str, list[float]] = defaultdict(list)
-        self._linkedin_counts: dict[str, list[float]] = defaultdict(list)
+    async def _check(self, org_id: str, channel: str, max_per_day: int = 20) -> tuple[bool, int]:
+        key = f"ratelimit:{org_id}:{channel}"
+        count = await redis_service.incr(key, expire=86400)
+        return (count <= max_per_day), max(0, max_per_day - count)
 
-    def _prune(self, counts: list[float], window: float):
-        now = time.time()
-        while counts and counts[0] < now - window:
-            counts.pop(0)
+    async def check_email(self, org_id: str, max_per_day: int = 20) -> tuple[bool, int]:
+        return await self._check(org_id, "email", max_per_day)
 
-    def check_email(self, org_id: str, max_per_day: int = 20) -> tuple[bool, int]:
-        self._prune(self._email_counts[org_id], 86400)
-        self._email_counts[org_id].append(time.time())
-        remaining = max_per_day - len(self._email_counts[org_id])
-        return (len(self._email_counts[org_id]) <= max_per_day), max(0, remaining)
+    async def check_call(self, org_id: str, max_per_day: int = 10) -> tuple[bool, int]:
+        return await self._check(org_id, "call", max_per_day)
 
-    def check_call(self, org_id: str, max_per_day: int = 10) -> tuple[bool, int]:
-        self._prune(self._call_counts[org_id], 86400)
-        self._call_counts[org_id].append(time.time())
-        remaining = max_per_day - len(self._call_counts[org_id])
-        return (len(self._call_counts[org_id]) <= max_per_day), max(0, remaining)
+    async def check_linkedin(self, org_id: str, max_per_day: int = 15) -> tuple[bool, int]:
+        return await self._check(org_id, "linkedin", max_per_day)
 
-    def check_linkedin(self, org_id: str, max_per_day: int = 15) -> tuple[bool, int]:
-        self._prune(self._linkedin_counts[org_id], 86400)
-        self._linkedin_counts[org_id].append(time.time())
-        remaining = max_per_day - len(self._linkedin_counts[org_id])
-        return (len(self._linkedin_counts[org_id]) <= max_per_day), max(0, remaining)
+    async def get_usage(self, org_id: str) -> dict:
+        channels = ["email", "call", "linkedin"]
+        result = {}
+        for ch in channels:
+            val = await redis_service.get(f"ratelimit:{org_id}:{ch}")
+            result[f"{ch}s_today"] = int(val) if val else 0
+        return result
 
-    def get_usage(self, org_id: str) -> dict:
-        self._prune(self._email_counts[org_id], 86400)
-        self._prune(self._call_counts[org_id], 86400)
-        self._prune(self._linkedin_counts[org_id], 86400)
-        return {
-            "emails_today": len(self._email_counts.get(org_id, [])),
-            "calls_today": len(self._call_counts.get(org_id, [])),
-            "linkedin_today": len(self._linkedin_counts.get(org_id, [])),
-        }
-
-    def reset_org(self, org_id: str):
-        self._email_counts.pop(org_id, None)
-        self._call_counts.pop(org_id, None)
-        self._linkedin_counts.pop(org_id, None)
+    async def reset_org(self, org_id: str):
+        for ch in ("email", "call", "linkedin"):
+            await redis_service.delete(f"ratelimit:{org_id}:{ch}")
 
 
 rate_limiter = RateLimiter()

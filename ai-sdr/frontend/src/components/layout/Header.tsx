@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { Bell, Search, LogOut, User, Settings, Sparkles, ChevronDown } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/useAuth"
-import { ThemeToggle } from "./ThemeToggle"
+
 
 export function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -60,8 +60,6 @@ export function Header() {
 
       {/* Right side */}
       <div className="flex items-center gap-2">
-        <ThemeToggle />
-
         {/* Notifications */}
         <button className="relative p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-200 group">
           <Bell size={18} />
