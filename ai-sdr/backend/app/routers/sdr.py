@@ -9,11 +9,16 @@ from app.database import get_db
 from app.models.user import User
 from app.models.agent import SDRProfile, LeadState, AgentLog
 from app.models.lead import Lead
+from app.models.agent_activity import AgentActivity, SDRReasoningLog, CampaignEvent, LeadTimeline, SequenceExecutionLog, SDRStatus
 from app.utils.auth import get_current_user
 from app.utils.crypto import encrypt_value, decrypt_value
 from app.services.sdr.credentials import (
     encrypt_sdr_credentials, decrypt_sdr_credentials,
     has_email_configured, has_linkedin_configured, get_email_sender,
+)
+from app.services.sdr.activity_service import (
+    get_activity_feed, get_reasoning_logs, get_sdr_status_info,
+    get_lead_timeline, get_activity_stages_summary,
 )
 
 router = APIRouter(prefix="/sdr", tags=["sdr"])
@@ -62,6 +67,7 @@ def serialize_sdr(profile: SDRProfile) -> dict:
         "is_active": bool(profile.is_active),
         "leads_target": profile.leads_target or 100,
         "created_at": profile.created_at.isoformat() if profile.created_at else "",
+        "deleted_at": profile.deleted_at.isoformat() if profile.deleted_at else None,
     }
 
 
@@ -71,7 +77,7 @@ async def list_sdr_profiles(
     user: User = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(SDRProfile).where(SDRProfile.org_id == user.org_id).order_by(SDRProfile.created_at.desc())
+        select(SDRProfile).where(SDRProfile.org_id == user.org_id, SDRProfile.deleted_at == None).order_by(SDRProfile.created_at.desc())
     )
     return [serialize_sdr(p) for p in result.scalars().all()]
 
@@ -158,20 +164,105 @@ async def update_sdr_profile(
     return serialize_sdr(profile)
 
 
-@router.delete("/profiles/{profile_id}")
-async def delete_sdr_profile(
+@router.get("/profiles/{profile_id}/deletion-impact")
+async def get_sdr_deletion_impact(
     profile_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from app.models.campaign import Campaign
+    from app.models.agent_activity import SDRStatus, AgentActivity
+
     result = await db.execute(
         select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
     )
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="SDR profile not found")
-    await db.delete(profile)
-    return {"status": "deleted"}
+
+    campaigns = await db.execute(
+        select(Campaign).where(Campaign.org_id == user.org_id, Campaign.sdr_profile_id == profile_id)
+    )
+    campaign_list = campaigns.scalars().all()
+    active_campaigns = [c for c in campaign_list if c.status == "active"]
+    total_campaigns = len(campaign_list)
+
+    lead_states = await db.execute(
+        select(LeadState).where(LeadState.org_id == user.org_id, LeadState.sdr_profile_id == profile_id)
+    )
+    ls_list = lead_states.scalars().all()
+
+    total_leads = len(ls_list)
+    active_leads = len([ls for ls in ls_list if ls.state not in ("closed_won", "closed_lost", "archived")])
+
+    activities = await db.execute(
+        select(AgentActivity).where(AgentActivity.org_id == user.org_id, AgentActivity.sdr_profile_id == profile_id).limit(1)
+    )
+    has_activity = activities.first() is not None
+
+    email_configured = has_email_configured(profile.email_credentials_encrypted)
+    linkedin_configured = has_linkedin_configured(profile.linkedin_credentials_encrypted)
+
+    return {
+        "sdr_name": profile.name or "AI SDR",
+        "total_campaigns": total_campaigns,
+        "active_campaigns": len(active_campaigns),
+        "total_leads_associated": total_leads,
+        "active_leads_in_pipeline": active_leads,
+        "email_connected": email_configured,
+        "linkedin_connected": linkedin_configured,
+        "has_activity_history": has_activity,
+        "is_active": profile.is_active,
+    }
+
+
+class SDRDeleteConfirm(BaseModel):
+    confirmation: str
+
+
+@router.post("/profiles/{profile_id}/delete")
+async def delete_sdr_profile_secure(
+    profile_id: str,
+    body: SDRDeleteConfirm,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if body.confirmation != "DELETE":
+        raise HTTPException(status_code=400, detail="Type DELETE to confirm deletion")
+
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+
+    from datetime import datetime, timezone
+    profile.deleted_at = datetime.now(timezone.utc)
+    profile.deleted_by = user.id
+    profile.is_active = False
+
+    from app.models.campaign import Campaign
+    campaigns = await db.execute(
+        select(Campaign).where(Campaign.org_id == user.org_id, Campaign.sdr_profile_id == profile_id)
+    )
+    for c in campaigns.scalars().all():
+        c.sdr_profile_id = None
+
+    from app.models.agent_activity import SDRStatus
+    statuses = await db.execute(
+        select(SDRStatus).where(SDRStatus.org_id == user.org_id, SDRStatus.sdr_profile_id == profile_id)
+    )
+    for s in statuses.scalars().all():
+        await db.delete(s)
+
+    from app.services.audit.service import log_audit
+    await log_audit(db, user.org_id, user.id, "sdr_deleted",
+                    f"SDR profile '{profile.name}' deleted by {user.name or user.email}",
+                    extra={"profile_id": profile_id, "profile_name": profile.name})
+
+    await db.flush()
+    return {"status": "deleted", "sdr_name": profile.name}
 
 
 # ============================================================
@@ -397,7 +488,7 @@ async def activate_sdr(
     profile.is_active = True
     await db.flush()
 
-    from app.services.sdr.orchestrator import start_sdr_cycle
+    from app.services.sdr.sdr_orchestrator import start_sdr_cycle
     import asyncio
     asyncio.create_task(start_sdr_cycle(user.org_id, sdr_profile_id=profile_id))
 
@@ -448,6 +539,95 @@ async def get_agent_activity(
         }
         for log in logs
     ]
+
+
+@router.get("/activity/feed")
+async def get_structured_activity(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    sdr_profile_id: Optional[str] = None,
+    stage: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    return await get_activity_feed(db, user.org_id, sdr_profile_id, stage, limit, offset)
+
+
+@router.get("/activity/reasoning")
+async def get_reasoning(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    sdr_profile_id: Optional[str] = None,
+    lead_id: Optional[str] = None,
+    limit: int = 50,
+):
+    return await get_reasoning_logs(db, user.org_id, sdr_profile_id, lead_id, limit)
+
+
+@router.get("/activity/stages")
+async def get_activity_stages(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    sdr_profile_id: Optional[str] = None,
+):
+    return await get_activity_stages_summary(db, user.org_id, sdr_profile_id)
+
+
+@router.get("/activity/lead-timeline/{lead_id}")
+async def get_lead_activity_timeline(
+    lead_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    limit: int = 50,
+):
+    return await get_lead_timeline(db, user.org_id, lead_id, limit)
+
+
+@router.get("/status")
+async def get_sdr_status(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    sdr_profile_id: Optional[str] = None,
+):
+    if sdr_profile_id:
+        info = await get_sdr_status_info(db, user.org_id, sdr_profile_id)
+        return info or {"current_status": "inactive", "leads_processed": 0}
+    profiles = await db.execute(
+        select(SDRProfile).where(SDRProfile.org_id == user.org_id)
+    )
+    results = []
+    for p in profiles.scalars().all():
+        info = await get_sdr_status_info(db, user.org_id, p.id)
+        if info:
+            info["sdr_name"] = p.name
+            info["sdr_id"] = p.id
+            results.append(info)
+    return results or [{"current_status": "inactive", "leads_processed": 0}]
+
+
+@router.get("/activity/performance")
+async def get_sdr_performance(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    sdr_profile_id: Optional[str] = None,
+):
+    if sdr_profile_id:
+        info = await get_sdr_status_info(db, user.org_id, sdr_profile_id)
+        if info:
+            return info
+        return {"leads_processed": 0, "campaigns_created": 0, "emails_drafted": 0,
+                "linkedin_invites_sent": 0, "replies_detected": 0, "meetings_booked": 0}
+    profiles = await db.execute(
+        select(SDRProfile).where(SDRProfile.org_id == user.org_id)
+    )
+    totals = {"leads_processed": 0, "campaigns_created": 0, "emails_drafted": 0,
+              "linkedin_invites_sent": 0, "replies_detected": 0, "meetings_booked": 0}
+    for p in profiles.scalars().all():
+        info = await get_sdr_status_info(db, user.org_id, p.id)
+        if info:
+            for k in totals:
+                totals[k] += info.get(k, 0)
+    return totals
 
 
 @router.get("/leads")
@@ -545,3 +725,189 @@ async def stop_lead(lead_id: str, db: AsyncSession = Depends(get_db), user: User
     ls.is_paused = False
     await db.flush()
     return {"status": "stopped"}
+
+
+# ============================================================
+# Campaign Dashboard & AI Reasoning Endpoints
+# ============================================================
+
+@router.get("/campaign-dashboard")
+async def get_sdr_campaign_dashboard(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    sdr_profile_id: Optional[str] = None,
+):
+    from app.models.campaign import Campaign, CampaignStep, EmailMessage
+    from sqlalchemy import func
+
+    query = select(Campaign).where(Campaign.org_id == user.org_id)
+    if sdr_profile_id:
+        query = query.where(Campaign.sdr_profile_id == sdr_profile_id)
+    query = query.order_by(Campaign.created_at.desc())
+    result = await db.execute(query)
+    campaigns = result.scalars().all()
+
+    output = []
+    for c in campaigns:
+        steps_result = await db.execute(
+            select(CampaignStep).where(CampaignStep.campaign_id == c.id).order_by(CampaignStep.step_order)
+        )
+        steps = steps_result.scalars().all()
+
+        total_sent = await db.scalar(
+            select(func.count(EmailMessage.id)).where(
+                EmailMessage.org_id == user.org_id,
+                EmailMessage.campaign_id == c.id,
+            )
+        )
+        total_opened = await db.scalar(
+            select(func.count(EmailMessage.id)).where(
+                EmailMessage.org_id == user.org_id,
+                EmailMessage.campaign_id == c.id,
+                EmailMessage.opened_at.isnot(None),
+            )
+        )
+        total_replied = await db.scalar(
+            select(func.count(EmailMessage.id)).where(
+                EmailMessage.org_id == user.org_id,
+                EmailMessage.campaign_id == c.id,
+                EmailMessage.replied_at.isnot(None),
+            )
+        )
+
+        lead_states_result = await db.execute(
+            select(LeadState).where(LeadState.org_id == user.org_id)
+        )
+        lead_states = lead_states_result.scalars().all()
+        pipeline = {}
+        for ls in lead_states:
+            s = ls.state or "new"
+            pipeline[s] = pipeline.get(s, 0) + 1
+
+        latest_logs_result = await db.execute(
+            select(AgentLog).where(
+                AgentLog.org_id == user.org_id,
+                AgentLog.sdr_profile_id == c.sdr_profile_id,
+            ).order_by(AgentLog.created_at.desc()).limit(10)
+        )
+        logs = latest_logs_result.scalars().all()
+
+        sdr_name = ""
+        if c.sdr_profile_id:
+            sdr_result = await db.execute(select(SDRProfile).where(SDRProfile.id == c.sdr_profile_id))
+            sdr = sdr_result.scalar_one_or_none()
+            if sdr:
+                sdr_name = sdr.name or "AI SDR"
+
+        output.append({
+            "id": c.id,
+            "name": c.name,
+            "description": c.description,
+            "status": c.status,
+            "ai_generated": c.ai_generated,
+            "sdr_profile_id": c.sdr_profile_id,
+            "sdr_name": sdr_name,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "steps": [
+                {
+                    "channel": s.channel,
+                    "step_order": s.step_order,
+                    "delay_days": s.delay_days,
+                }
+                for s in steps
+            ],
+            "emails_sent": total_sent or 0,
+            "emails_opened": total_opened or 0,
+            "emails_replied": total_replied or 0,
+            "pipeline": pipeline,
+            "recent_reasoning": [
+                {
+                    "action": log.action,
+                    "channel": log.channel,
+                    "reasoning": log.reasoning,
+                    "result": log.result,
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                }
+                for log in logs
+            ],
+        })
+
+    return output
+
+
+@router.get("/reasoning/{sdr_profile_id}")
+async def get_sdr_reasoning(
+    sdr_profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    limit: int = 50,
+):
+    result = await db.execute(
+        select(AgentLog).where(
+            AgentLog.org_id == user.org_id,
+            AgentLog.sdr_profile_id == sdr_profile_id,
+        ).order_by(AgentLog.created_at.desc()).limit(limit)
+    )
+    logs = result.scalars().all()
+    return [
+        {
+            "id": log.id,
+            "lead_id": log.lead_id,
+            "action": log.action,
+            "channel": log.channel,
+            "reasoning": log.reasoning,
+            "result": log.result,
+            "status": log.status,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        }
+        for log in logs
+    ]
+
+
+@router.post("/pause-all")
+async def pause_all_sdr(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.org_id == user.org_id)
+    )
+    profiles = result.scalars().all()
+    for p in profiles:
+        p.is_active = False
+    await db.flush()
+    return {"status": "all_paused"}
+
+
+@router.post("/emergency-stop")
+async def emergency_stop(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.org_id == user.org_id)
+    )
+    profiles = result.scalars().all()
+    for p in profiles:
+        p.is_active = False
+
+    lead_states = await db.execute(
+        select(LeadState).where(LeadState.org_id == user.org_id, LeadState.is_paused == False)
+    )
+    for ls in lead_states.scalars().all():
+        ls.is_paused = True
+
+    await db.flush()
+
+    log = AgentLog(
+        org_id=user.org_id,
+        action="emergency_stop",
+        channel=None,
+        reasoning="Admin triggered emergency stop",
+        result="All SDRs paused, all leads paused",
+        status="completed",
+    )
+    db.add(log)
+    await db.flush()
+
+    return {"status": "emergency_stop_executed"}

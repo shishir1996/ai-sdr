@@ -34,6 +34,7 @@ export function useAuth() {
   const login = useCallback(async (email: string, password: string) => {
     const data = await api.post<{ access_token: string; refresh_token: string }>("/auth/login", { email, password })
     api.setToken(data.access_token)
+    localStorage.setItem("access_token", data.access_token)
     localStorage.setItem("refresh_token", data.refresh_token)
     const me = await api.get<User>("/auth/me")
     localStorage.setItem("org_id", me.org_id)
@@ -45,6 +46,7 @@ export function useAuth() {
       name, email, password, org_name: orgName,
     })
     api.setToken(data.access_token)
+    localStorage.setItem("access_token", data.access_token)
     localStorage.setItem("refresh_token", data.refresh_token)
     const me = await api.get<User>("/auth/me")
     localStorage.setItem("org_id", me.org_id)
@@ -53,6 +55,7 @@ export function useAuth() {
 
   const logout = useCallback(() => {
     api.clearToken()
+    localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")
     localStorage.removeItem("org_id")
     setUser(null)

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { api } from "@/lib/api-client"
-import { Target, Mail, Phone, Users, RefreshCw, CheckCircle, Clock, BarChart3, MessageCircle, Bot } from "lucide-react"
+import Link from "next/link"
+import { Target, Mail, Phone, Users, RefreshCw, CheckCircle, Clock, BarChart3, MessageCircle, Bot, ChevronRight } from "lucide-react"
 
 interface CampaignDetail {
   id: string
@@ -63,11 +64,11 @@ export default function CampaignsPage() {
             const replyRate = sent > 0 ? Math.round((c.emails_replied || 0) / sent * 100) : 0
 
             return (
-              <div key={c.id} className="card p-5">
+              <Link key={c.id} href={`/campaigns/${c.id}`} className="card p-5 block group hover:border-purple-500/30 transition-colors">
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-lg">{c.name}</h3>
+                      <h3 className="font-semibold text-lg group-hover:text-purple-400 transition-colors">{c.name}</h3>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${c.status === "active" ? "bg-green-500/10 text-green-600" : c.status === "completed" ? "bg-blue-500/10 text-blue-600" : "bg-muted text-muted-foreground"}`}>{c.status}</span>
                       {c.ai_generated && <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600">AI Generated</span>}
                       {c.sdr_name && <span className="text-xs px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-600 flex items-center gap-1"><Bot size={10} /> {c.sdr_name}</span>}
@@ -130,7 +131,10 @@ export default function CampaignsPage() {
                     </div>
                   </div>
                 )}
+              <div className="flex items-center gap-1 mt-2 text-xs text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                View details <ChevronRight size={12} />
               </div>
+            </Link>
             )
           })}
         </div>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Bell, Search, LogOut, User, Settings, Sparkles, ChevronDown } from "lucide-react"
+import { Bell, Search, LogOut, Settings, ChevronDown } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/useAuth"
 
@@ -11,7 +11,7 @@ export function Header() {
   const [searchFocused, setSearchFocused] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -23,11 +23,9 @@ export function Header() {
     return () => document.removeEventListener("mousedown", handleClick)
   }, [])
 
-  const logout = () => {
-    localStorage.removeItem("access_token")
-    localStorage.removeItem("refresh_token")
-    localStorage.removeItem("org_id")
-    router.push("/login")
+  const doLogout = () => {
+    logout()
+    router.push("/")
   }
 
   const initials = user?.name
@@ -106,7 +104,7 @@ export function Header() {
 
               <div className="border-t border-white/5 py-1">
                 <button
-                  onClick={logout}
+                  onClick={doLogout}
                   className="flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-white/5 transition-colors w-full text-left"
                 >
                   <LogOut size={16} />

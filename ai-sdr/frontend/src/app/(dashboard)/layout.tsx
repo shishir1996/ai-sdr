@@ -14,7 +14,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     const token = localStorage.getItem("access_token")
     if (!token) {
-      router.replace("/login")
+      router.replace("/")
     } else {
       setChecked(true)
     }

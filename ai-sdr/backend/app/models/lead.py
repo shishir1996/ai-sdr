@@ -42,6 +42,7 @@ class Lead(Base):
     source = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
     custom_fields = Column(Text, nullable=True)
+    is_blacklisted = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

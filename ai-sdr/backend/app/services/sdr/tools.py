@@ -58,7 +58,6 @@ async def send_email_tool(
 
     email_content = await _generate_email_content(lead_data, profile, profile.outreach_tone, ai_key)
 
-    # Check per-SDR email credentials first
     sdr_creds = _get_sdr_email_creds(profile)
 
     if sdr_creds and sdr_creds.get("provider") == "gmail":
@@ -101,7 +100,6 @@ async def send_email_tool(
         if result.get("success"):
             return f"Email sent to {lead_data['email']} via SDR SMTP: {email_content.get('subject', '')}"
 
-    # Fallback to global Gmail integration
     gmail_client_id = await resolve_api_key(db, org_id, "gmail")
     gmail_client_secret = await resolve_api_secret(db, org_id, "gmail")
     gmail_refresh_token = await resolve_refresh_token(db, org_id, "gmail")
@@ -119,7 +117,6 @@ async def send_email_tool(
         if result and result.get("status") == "sent":
             return f"Email sent to {lead_data['email']} via Global Gmail: {email_content.get('subject', '')}"
 
-    # Fallback to global SMTP
     from app.services.email.smtp_service import send_email_via_smtp
     smtp_result = await send_email_via_smtp(db, org_id, lead_data["email"], email_content.get("subject", "Hello"), email_content.get("body", ""))
     if smtp_result.get("success"):
@@ -139,7 +136,6 @@ async def send_linkedin_message_tool(
     if not lead_data.get("linkedin_url"):
         return "No LinkedIn URL available"
 
-    # Check per-SDR LinkedIn credentials first
     sdr_creds = _get_sdr_linkedin_creds(profile)
     li_email = None
     li_password = None
@@ -148,7 +144,6 @@ async def send_linkedin_message_tool(
         li_email = sdr_creds.get("email")
         li_password = sdr_creds.get("password")
 
-    # Fallback to global LinkedIn integration
     if not li_email or not li_password:
         li_email = await resolve_api_key(db, org_id, "linkedin")
         li_password = await resolve_api_secret(db, org_id, "linkedin")

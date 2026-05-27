@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { api } from "@/lib/api-client"
-import { Save, Key, Check, AlertCircle, ExternalLink, LogOut, ChevronDown, ChevronRight, Cpu } from "lucide-react"
+import { Save, Key, Check, AlertCircle, ExternalLink, ChevronDown, ChevronRight, Cpu, ChevronsUpDown, Loader, LogOut } from "lucide-react"
 
 interface ProviderMeta {
   provider: string
@@ -19,9 +19,43 @@ interface Integration {
   has_api_key: boolean
   has_api_secret: boolean
   has_refresh_token: boolean
+  extra_config?: Record<string, string> | null
+}
+
+interface AiModel {
+  model_id: string
+  display_name: string
+  provider: string
+  max_tokens: number
+  cost_per_1k_input: number
+  cost_per_1k_output: number
 }
 
 const AI_PROVIDERS = ["together_ai", "openai", "anthropic", "google_ai", "openrouter"]
+
+const AI_PROVIDER_LABELS: Record<string, string> = {
+  together_ai: "Together AI",
+  openai: "OpenAI",
+  anthropic: "Anthropic (Claude)",
+  google_ai: "Google AI (Gemini)",
+  openrouter: "OpenRouter",
+}
+
+const AI_PROVIDER_DESCRIPTIONS: Record<string, string> = {
+  together_ai: "Llama 3.1, Mixtral, and other open models via Together AI",
+  openai: "GPT-4o, GPT-4o Mini, GPT-3.5 Turbo",
+  anthropic: "Claude 3.5 Sonnet, Claude 3 Haiku",
+  google_ai: "Gemini 1.5 Pro, Gemini 1.5 Flash",
+  openrouter: "200+ models including DeepSeek, Claude, GPT, Gemini via one API",
+}
+
+const AI_PROVIDER_LOGOS: Record<string, string> = {
+  together_ai: "🧠",
+  openai: "⚡",
+  anthropic: "🌿",
+  google_ai: "🔮",
+  openrouter: "🌐",
+}
 
 export default function IntegrationsPage() {
   const [providers, setProviders] = useState<ProviderMeta[]>([])
@@ -31,9 +65,75 @@ export default function IntegrationsPage() {
   const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
 
+  // AI provider config state
+  const [selectedProvider, setSelectedProvider] = useState<string>("openrouter")
+  const [availableModels, setAvailableModels] = useState<AiModel[]>([])
+  const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash-free")
+  const [aiApiKey, setAiApiKey] = useState("")
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [savingAi, setSavingAi] = useState(false)
+  const [aiSaved, setAiSaved] = useState(false)
+
   useEffect(() => {
     loadData()
   }, [])
+
+  useEffect(() => {
+    if (integrations.length > 0) {
+      const savedAi = integrations.find(i => AI_PROVIDERS.includes(i.provider) && i.has_api_key)
+      if (savedAi) {
+        setSelectedProvider(savedAi.provider)
+        setAiApiKey("")
+        if (savedAi.extra_config?.model) {
+          setSelectedModel(savedAi.extra_config.model)
+        }
+      }
+    }
+  }, [integrations])
+
+  useEffect(() => {
+    fetchModels(selectedProvider)
+  }, [selectedProvider])
+
+  const fetchModels = async (provider: string) => {
+    setLoadingModels(true)
+    setAvailableModels([])
+    try {
+      const models = await api.get<AiModel[]>(`/admin/integrations/ai/models?provider=${provider}`)
+      setAvailableModels(models)
+      const savedAi = integrations.find(i => i.provider === provider && i.extra_config?.model)
+      if (savedAi?.extra_config?.model) {
+        setSelectedModel(savedAi.extra_config.model)
+      } else if (models.length > 0) {
+        setSelectedModel(models[0].model_id)
+      }
+    } catch {
+      setAvailableModels([])
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  const handleSaveAi = async () => {
+    setSavingAi(true)
+    setAiSaved(false)
+    setError(null)
+    try {
+      await api.put(`/admin/integrations/${selectedProvider}`, {
+        api_key: aiApiKey || null,
+        model: selectedModel,
+        is_active: true,
+      })
+      setAiSaved(true)
+      setAiApiKey("")
+      setTimeout(() => setAiSaved(false), 2000)
+      await loadData()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSavingAi(false)
+    }
+  }
 
   const loadData = async () => {
     try {
@@ -76,7 +176,6 @@ export default function IntegrationsPage() {
 
   const getIntegration = (provider: string) => integrations.find((i) => i.provider === provider)
 
-  const aiProviders = providers.filter((p) => AI_PROVIDERS.includes(p.provider))
   const otherProviders = providers.filter((p) => !AI_PROVIDERS.includes(p.provider))
 
   return (
@@ -97,85 +196,125 @@ export default function IntegrationsPage() {
 
       <div className="space-y-4">
         {/* AI Providers Section */}
-        {aiProviders.length > 0 && (
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <Cpu size={18} className="text-purple-500" />
-              <h2 className="text-lg font-semibold">AI Providers</h2>
-              <span className="text-xs text-muted-foreground">At least one required for AI features</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {aiProviders.map((provider) => {
-                const integration = getIntegration(provider.provider)
-                const isSaved = !!integration
-                const isSaving = saving[provider.provider]
-                const isSavedNotif = saved[provider.provider]
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <Cpu size={18} className="text-purple-500" />
+            <h2 className="text-lg font-semibold">AI Configuration</h2>
+            <span className="text-xs text-muted-foreground">Choose provider, model, and enter API key</span>
+          </div>
 
-                return (
-                  <div key={provider.provider} className="card p-4 border-purple-500/20">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold">{provider.label}</h3>
-                          {isSaved && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600">
-                              <Check size={12} /> Added
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-1">{provider.description}</p>
-                      </div>
-                      <Key size={18} className="text-muted-foreground shrink-0" />
-                    </div>
-
-                    <div className="space-y-2.5">
-                      {provider.fields.map((field) => (
-                        <div key={field.key}>
-                          <label className="block text-xs font-medium mb-1">{field.label}</label>
-                          <input
-                            type={field.type}
-                            placeholder={isSaved ? "•••••••• (replace to update)" : field.placeholder}
-                            value={formData[provider.provider]?.[field.key] || ""}
-                            onChange={(e) =>
-                              setFormData((prev) => ({
-                                ...prev,
-                                [provider.provider]: {
-                                  ...(prev[provider.provider] || {}),
-                                  [field.key]: e.target.value,
-                                },
-                              }))
-                            }
-                            className="w-full px-3 py-2 rounded-lg border bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                          />
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center justify-end mt-3 gap-2">
-                      {isSavedNotif && (
-                        <span className="text-xs text-green-600 flex items-center gap-1"><Check size={14} /> Saved</span>
+          <div className="card p-5 border-purple-500/20 space-y-5">
+            {/* Provider Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">AI Provider</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                {AI_PROVIDERS.map((p) => {
+                  const saved = integrations.find(i => i.provider === p)
+                  const isActive = selectedProvider === p
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => { setSelectedProvider(p); setAiApiKey("") }}
+                      className={`relative flex flex-col items-center gap-1.5 p-3 rounded-xl border text-sm transition-all ${
+                        isActive
+                          ? "border-purple-500 bg-purple-500/10 text-white"
+                          : "border-white/10 bg-white/5 text-gray-400 hover:border-white/20 hover:text-gray-300"
+                      }`}
+                    >
+                      <span className="text-lg">{AI_PROVIDER_LOGOS[p]}</span>
+                      <span className="font-medium text-xs text-center">{AI_PROVIDER_LABELS[p]}</span>
+                      {saved?.has_api_key && (
+                        <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                          <Check size={10} className="text-white" />
+                        </span>
                       )}
-                      <button
-                        onClick={() => handleSave(provider.provider)}
-                        disabled={isSaving || !formData[provider.provider]}
-                        className="btn-primary text-sm disabled:opacity-50"
-                      >
-                        {isSaving ? (
-                          <span className="flex items-center gap-1">
-                            <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                            Saving...
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1"><Save size={16} /> {isSaved ? "Update" : "Save"}</span>
-                        )}
-                      </button>
-                    </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Model Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                AI Model
+                {loadingModels && <Loader size={12} className="inline ml-2 animate-spin text-purple-400" />}
+              </label>
+              {availableModels.length > 0 ? (
+                <div className="relative">
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-white"
+                  >
+                    {availableModels.map((m) => {
+                      const saved = integrations.find(i => i.provider === selectedProvider)
+                      const isModelSaved = saved?.extra_config?.model === m.model_id
+                      return (
+                        <option key={m.model_id} value={m.model_id} className="bg-gray-900 text-white">
+                          {m.display_name} {isModelSaved ? "✓" : ""}
+                          {m.cost_per_1k_input > 0 ? ` ($${m.cost_per_1k_input}/1K input)` : " (Free)"}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <ChevronsUpDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                </div>
+              ) : (
+                !loadingModels && (
+                  <div className="px-3 py-2.5 rounded-xl border border-dashed border-white/10 text-sm text-gray-500">
+                    {selectedProvider === "openrouter"
+                      ? "OpenRouter supports 200+ models. Select after entering API key or use the default."
+                      : "No models available for this provider"}
                   </div>
                 )
-              })}
+              )}
+            </div>
+
+            {/* API Key */}
+            <div>
+              <label className="block text-sm font-medium mb-2">API Key</label>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Key size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="password"
+                    placeholder={integrations.find(i => i.provider === selectedProvider)?.has_api_key ? "•••••••• (leave blank to keep existing)" : `Enter ${AI_PROVIDER_LABELS[selectedProvider]} API key`}
+                    value={aiApiKey}
+                    onChange={(e) => setAiApiKey(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                </div>
+              </div>
+              {integrations.find(i => i.provider === selectedProvider)?.has_api_key && (
+                <p className="text-xs text-emerald-500 mt-1.5 flex items-center gap-1">
+                  <Check size={12} /> API key already saved for this provider
+                </p>
+              )}
+            </div>
+
+            {/* Save Button */}
+            <div className="flex items-center justify-end gap-3 pt-1">
+              {aiSaved && (
+                <span className="text-xs text-green-500 flex items-center gap-1"><Check size={14} /> AI configuration saved</span>
+              )}
+              <button
+                onClick={handleSaveAi}
+                disabled={savingAi}
+                className="btn-primary text-sm px-6"
+              >
+                {savingAi ? (
+                  <span className="flex items-center gap-2">
+                    <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                    Saving...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2"><Save size={16} /> Save AI Configuration</span>
+                )}
+              </button>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Other Providers Section */}
         <div>

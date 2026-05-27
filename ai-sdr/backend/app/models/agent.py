@@ -103,6 +103,10 @@ class SDRProfile(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
+    # Soft-delete
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(String, nullable=True)
+
     organization = relationship("Organization")
 
 

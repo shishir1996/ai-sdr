@@ -10,7 +10,7 @@ export default function SettingsPage() {
   const handleLogout = () => {
     localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")
-    router.push("/login")
+    router.push("/")
   }
 
   return (
