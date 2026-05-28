@@ -15,4 +15,4 @@ COPY ai-sdr/backend/ .
 
 EXPOSE 8000
 
-CMD uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --limit-concurrency 64
+CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --limit-concurrency 64
