@@ -5,6 +5,7 @@ from typing import Optional
 
 
 ALLOWED_ORIGINS = [
+    "https://outreacai.offdx.in",
     "https://ai-sdr-mauve.vercel.app",
     "http://localhost:3000",
 ]
@@ -44,7 +45,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 f"style-src 'self' 'unsafe-inline'; "
                 f"img-src 'self' data: blob: https:; "
                 f"font-src 'self' data:; "
-                f"connect-src 'self' https://ai-sdr-mauve.vercel.app; "
+                f"connect-src 'self' https://api.outreacai.offdx.in; "
                 f"frame-src 'self'; "
                 f"object-src 'none'"
             )
