@@ -21,7 +21,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 f"style-src 'self' 'unsafe-inline'; "
                 f"img-src 'self' data: blob: https:; "
                 f"font-src 'self' data:; "
-                f"connect-src 'self' {self.frontend_url}; "
+                f"connect-src 'self' {self.frontend_url} https://ai-sdr-mauve.vercel.app; "
                 f"frame-src 'self'; "
                 f"object-src 'none'"
             )
@@ -43,7 +43,7 @@ def get_cors_origins(is_production: bool, frontend_url: str) -> list[str]:
     if is_production:
         return [
             frontend_url,
-            frontend_url.replace("https://", "https://api."),
+            "https://ai-sdr-mauve.vercel.app",
             "http://localhost:3000",
         ]
     return [frontend_url, "http://localhost:3000"]
