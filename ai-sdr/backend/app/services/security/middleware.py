@@ -4,14 +4,35 @@ from starlette.types import ASGIApp
 from typing import Optional
 
 
+ALLOWED_ORIGINS = [
+    "https://ai-sdr-mauve.vercel.app",
+    "http://localhost:3000",
+]
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp, is_production: bool = False, frontend_url: str = "http://localhost:3000"):
         super().__init__(app)
         self.is_production = is_production
-        self.frontend_url = frontend_url.rstrip("/")
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        response = await call_next(request)
+        origin = request.headers.get("origin", "")
+        if origin in ALLOWED_ORIGINS:
+            if request.method == "OPTIONS":
+                response = Response()
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT"
+                response.headers["Access-Control-Allow-Headers"] = "content-type,authorization"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Max-Age"] = "600"
+                return response
+
+            response = await call_next(request)
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
+        else:
+            response = await call_next(request)
 
         if self.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
@@ -21,7 +42,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 f"style-src 'self' 'unsafe-inline'; "
                 f"img-src 'self' data: blob: https:; "
                 f"font-src 'self' data:; "
-                f"connect-src 'self' {self.frontend_url} https://ai-sdr-mauve.vercel.app; "
+                f"connect-src 'self' https://ai-sdr-mauve.vercel.app; "
                 f"frame-src 'self'; "
                 f"object-src 'none'"
             )
@@ -39,11 +60,4 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def get_cors_origins(is_production: bool, frontend_url: str) -> list[str]:
-    frontend_url = frontend_url.rstrip("/")
-    if is_production:
-        return [
-            frontend_url,
-            "https://ai-sdr-mauve.vercel.app",
-            "http://localhost:3000",
-        ]
-    return [frontend_url, "http://localhost:3000"]
+    return ALLOWED_ORIGINS

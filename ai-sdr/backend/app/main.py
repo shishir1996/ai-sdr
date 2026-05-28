@@ -1,7 +1,6 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
@@ -27,7 +26,7 @@ from app.routers.vapi_webhook import router as vapi_webhook_router
 from app.routers.payments import router as payments_router
 from app.routers.calendar import router as calendar_router
 from app.services.feature_flag.service import seed_feature_flags
-from app.services.security.middleware import SecurityHeadersMiddleware, get_cors_origins
+from app.services.security.middleware import SecurityHeadersMiddleware
 from app.services.redis_service import init_redis
 
 settings = get_settings()
@@ -56,15 +55,6 @@ app.add_middleware(
     SecurityHeadersMiddleware,
     is_production=settings.IS_PRODUCTION,
     frontend_url=settings.FRONTEND_URL,
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=get_cors_origins(settings.IS_PRODUCTION, settings.FRONTEND_URL),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
 )
 
 
