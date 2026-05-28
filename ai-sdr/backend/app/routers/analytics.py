@@ -353,13 +353,13 @@ async def forecast(
     # Won deals by month
     monthly_won = await db.execute(
         select(
-            func.strftime("%Y-%m", Deal.won_at),
+            func.to_char(Deal.won_at, 'YYYY-MM'),
             func.count(Deal.id),
             func.coalesce(func.sum(Deal.value), 0),
         )
         .where(Deal.org_id == org_id, Deal.status == "won", Deal.won_at >= six_months_ago)
-        .group_by(func.strftime("%Y-%m", Deal.won_at))
-        .order_by(func.strftime("%Y-%m", Deal.won_at))
+        .group_by(func.to_char(Deal.won_at, 'YYYY-MM'))
+        .order_by(func.to_char(Deal.won_at, 'YYYY-MM'))
     )
 
     # Open deals pipeline

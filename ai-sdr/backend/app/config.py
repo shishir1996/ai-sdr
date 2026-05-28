@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     UPSTASH_REDIS_URL: str = ""
     UPSTASH_REDIS_TOKEN: str = ""
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
 
     # Auth
     SECRET_KEY: str = "change-me-in-production"

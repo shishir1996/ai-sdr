@@ -8,7 +8,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp, is_production: bool = False, frontend_url: str = "http://localhost:3000"):
         super().__init__(app)
         self.is_production = is_production
-        self.frontend_url = frontend_url
+        self.frontend_url = frontend_url.rstrip("/")
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -21,7 +21,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 f"style-src 'self' 'unsafe-inline'; "
                 f"img-src 'self' data: blob: https:; "
                 f"font-src 'self' data:; "
-                f"connect-src 'self' https://api.offdx.in https://app.offdx.in; "
+                f"connect-src 'self' {self.frontend_url}; "
                 f"frame-src 'self'; "
                 f"object-src 'none'"
             )
@@ -39,11 +39,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def get_cors_origins(is_production: bool, frontend_url: str) -> list[str]:
+    frontend_url = frontend_url.rstrip("/")
     if is_production:
         return [
-            "https://app.offdx.in",
-            "https://api.offdx.in",
-            "https://offdx.in",
-            "https://www.offdx.in",
+            frontend_url,
+            frontend_url.replace("https://", "https://api."),
+            "http://localhost:3000",
         ]
     return [frontend_url, "http://localhost:3000"]
