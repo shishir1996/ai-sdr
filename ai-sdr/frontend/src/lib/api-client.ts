@@ -1,4 +1,4 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ai-sdr-production-7589.up.railway.app/api/v1"
 
 interface ApiError {
   detail: string
