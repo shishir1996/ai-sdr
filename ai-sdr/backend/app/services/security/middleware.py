@@ -24,12 +24,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 response.headers["Access-Control-Allow-Methods"] = "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT"
                 response.headers["Access-Control-Allow-Headers"] = "content-type,authorization"
                 response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Private-Network"] = "true"
                 response.headers["Access-Control-Max-Age"] = "600"
                 return response
 
             response = await call_next(request)
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
             response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
         else:
             response = await call_next(request)
