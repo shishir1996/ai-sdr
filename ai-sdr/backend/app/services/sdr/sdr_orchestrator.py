@@ -43,6 +43,8 @@ from app.services.sdr.activity_service import (
 
 logger = logging.getLogger(__name__)
 
+_running_cycles: set = set()
+
 
 def _now():
     return datetime.now(timezone.utc)
@@ -59,6 +61,11 @@ async def _update_status(
 
 
 async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
+    cycle_key = sdr_profile_id or org_id
+    if cycle_key in _running_cycles:
+        logger.info(f"SDR cycle already running for {cycle_key}, skipping duplicate start")
+        return
+    _running_cycles.add(cycle_key)
     logger.info(f"=== SDR AUTONOMOUS CYCLE STARTED for org {org_id} profile {sdr_profile_id} ===")
     try:
         while True:
@@ -166,6 +173,9 @@ async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
             await asyncio.sleep(30)
     except Exception as e:
         logger.error(f"SDR cycle error: {e}", exc_info=True)
+    finally:
+        _running_cycles.discard(cycle_key)
+        logger.info(f"SDR cycle ended for {cycle_key}")
 
 
 async def _web_scrape_discovery(db: AsyncSession, org_id: str, profile: SDRProfile) -> int:
