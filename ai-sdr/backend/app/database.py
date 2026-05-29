@@ -47,6 +47,12 @@ async def init_db():
     else:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            try:
+                await conn.execute(
+                    text("ALTER TABLE email_messages ADD COLUMN direction VARCHAR(20) DEFAULT 'outbound'")
+                )
+            except Exception:
+                pass  # column already exists
 
 
 SUPABASE_URL: Optional[str] = None

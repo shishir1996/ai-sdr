@@ -311,15 +311,19 @@ async def _get_leads_needing_attention_inner(db: AsyncSession, org_id: str, prof
 
     logger.info(f"[_get_leads_needing_attention] returning {len(needs_attention)} leads needing attention (before opened-but-no-reply boost)")
 
-    opened_unreplied = await db.execute(
-        select(EmailMessage.lead_id).where(
-            EmailMessage.org_id == org_id,
-            EmailMessage.opened_at.isnot(None),
-            EmailMessage.replied_at.is_(None),
-            EmailMessage.direction == "outbound",
+    opened_lead_ids = set()
+    try:
+        opened_unreplied = await db.execute(
+            select(EmailMessage.lead_id).where(
+                EmailMessage.org_id == org_id,
+                EmailMessage.opened_at.isnot(None),
+                EmailMessage.replied_at.is_(None),
+                EmailMessage.direction == "outbound",
+            )
         )
-    )
-    opened_lead_ids = {row[0] for row in opened_unreplied.fetchall() if row[0]}
+        opened_lead_ids = {row[0] for row in opened_unreplied.fetchall() if row[0]}
+    except Exception as e:
+        logger.warning(f"[_get_leads_needing_attention] opened-but-no-reply query failed (column may not exist): {e}")
     existing_ids = {l.id for l in needs_attention}
     for lead in all_leads:
         if lead.id in opened_lead_ids and lead.id not in existing_ids:
