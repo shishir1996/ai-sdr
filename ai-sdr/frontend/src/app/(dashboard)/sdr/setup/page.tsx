@@ -220,8 +220,9 @@ export default function SDRSetupPage() {
       } else {
         router.push(sdrId ? `/sdr/${sdrId}` : "/sdr")
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e)
+      alert(e?.message || "Something went wrong. Please try again.")
     } finally {
       setSaving(false)
     }
