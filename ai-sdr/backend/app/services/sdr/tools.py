@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -8,6 +9,8 @@ from app.services.lead_extraction.apollo import search_leads
 from app.services.integrations.resolver import resolve_api_key, resolve_api_secret, resolve_refresh_token
 from app.models.agent import SDRProfile
 from app.services.sdr.credentials import decrypt_sdr_credentials
+
+logger = logging.getLogger(__name__)
 
 
 def _get_sdr_email_creds(profile: SDRProfile) -> Optional[dict]:
@@ -39,11 +42,15 @@ Company: {lead_data['company']}
 
 Return valid JSON with keys: subject, body"""
 
-    raw = generate_text(system_prompt, user_prompt, max_tokens=512, temperature=0.7, api_key=ai_key)
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {"subject": f"Quick question, {lead_data['name']}", "body": raw}
+        raw = generate_text(system_prompt, user_prompt, max_tokens=512, temperature=0.7, api_key=ai_key)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {"subject": f"Quick question, {lead_data['name']}", "body": raw}
+    except Exception as e:
+        logger.warning(f"Email generation failed: {e}")
+        return {"subject": f"Quick question, {lead_data['name']}", "body": f"Hi {lead_data['name']}, I came across {lead_data['company']} and wanted to connect."}
 
 
 async def send_email_tool(
@@ -76,13 +83,16 @@ async def send_email_tool(
         from app.services.email.smtp_service import SMTPSender
         from app.models.smtp import SMTPConfig
         import uuid
+        smtp_port = sdr_creds.get("port", 587)
+        smtp_use_ssl = sdr_creds.get("use_ssl", smtp_port == 465)
+        smtp_use_tls = sdr_creds.get("use_tls", not smtp_use_ssl and smtp_port == 587)
         test_config = SMTPConfig(
             id=str(uuid.uuid4()),
             org_id=org_id,
             host=sdr_creds.get("host", ""),
-            port=sdr_creds.get("port", 587),
-            use_tls=sdr_creds.get("use_tls", True),
-            use_ssl=sdr_creds.get("use_ssl", False),
+            port=smtp_port,
+            use_tls=smtp_use_tls,
+            use_ssl=smtp_use_ssl,
             username=sdr_creds.get("username", ""),
             password_encrypted=sdr_creds.get("password", ""),
             sender_name=sdr_creds.get("sender_name", "AI SDR"),
@@ -158,7 +168,11 @@ Tone: {profile.outreach_tone}"""
 
     user_prompt = f"Write a LinkedIn {'connection request' if action_type == 'connect' else 'DM'} for {lead_data['name']}, {lead_data['title']} at {lead_data['company']}"
 
-    message_text = generate_text(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
+    try:
+        message_text = generate_text(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
+    except Exception as e:
+        logger.warning(f"LinkedIn message generation failed: {e}")
+        message_text = f"Hi {lead_data['name']}, I came across your profile and was impressed by your work at {lead_data['company']}. Would love to connect!"
 
     from app.services.linkedin.linkedin_client import send_connection_request, send_dm
 
@@ -191,6 +205,8 @@ async def linkedin_like_tool(
     profile: SDRProfile,
     ai_key: Optional[str] = None,
 ) -> str:
+    if not lead_data.get("linkedin_url"):
+        return "No LinkedIn URL available"
     sdr_creds = _get_sdr_linkedin_creds(profile)
     li_email = sdr_creds.get("email") if sdr_creds else None
     li_password = sdr_creds.get("password") if sdr_creds else None
@@ -221,6 +237,8 @@ async def linkedin_comment_tool(
     profile: SDRProfile,
     ai_key: Optional[str] = None,
 ) -> str:
+    if not lead_data.get("linkedin_url"):
+        return "No LinkedIn URL available"
     sdr_creds = _get_sdr_linkedin_creds(profile)
     li_email = sdr_creds.get("email") if sdr_creds else None
     li_password = sdr_creds.get("password") if sdr_creds else None
@@ -238,7 +256,11 @@ Tone: {profile.outreach_tone}"""
 
     user_prompt = f"Write a LinkedIn comment engaging with {lead_data['name']}, {lead_data['title']} at {lead_data['company']}"
 
-    comment_text = generate_text(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
+    try:
+        comment_text = generate_text(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
+    except Exception as e:
+        logger.warning(f"LinkedIn comment generation failed: {e}")
+        comment_text = f"Great insights, {lead_data['name']}! Thanks for sharing."
 
     from app.services.linkedin.linkedin_client import comment_on_post
 
@@ -273,7 +295,11 @@ Keep it under 30 seconds. Include greeting, value prop, and call to action."""
 
     user_prompt = f"Call script for {lead_data['name']}, {lead_data['title']} at {lead_data['company']}"
 
-    script = generate_text(system_prompt, user_prompt, max_tokens=300, temperature=0.7, api_key=ai_key)
+    try:
+        script = generate_text(system_prompt, user_prompt, max_tokens=300, temperature=0.7, api_key=ai_key)
+    except Exception as e:
+        logger.warning(f"Call script generation failed: {e}")
+        script = f"Hi {lead_data['name']}, this is {profile.name or 'AI SDR'} from {profile.product_name or 'our company'}. I noticed your work at {lead_data['company']} and wanted to discuss how we can help. Give me a call back when you're free."
 
     from app.services.voice.vapi_client import make_call as vapi_call
     result = await vapi_call(lead_data["phone"], script=script, lead_info=lead_data, api_key_override=vapi_key)

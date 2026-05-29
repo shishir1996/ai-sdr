@@ -137,14 +137,20 @@ async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
                 logger.info(f"SDR cycle: {len(leads)} leads need attention")
 
                 for lead in leads:
-                    safety = await check_safety_controls(db, org_id, profile, "email")
-                    safety_linkedin = await check_safety_controls(db, org_id, profile, "linkedin")
-                    safety_call = await check_safety_controls(db, org_id, profile, "call")
-                    if not safety["can_proceed"] and not safety_linkedin["can_proceed"] and not safety_call["can_proceed"]:
-                        logger.warning(f"All safety limits reached for org {org_id}. Sleeping.")
-                        break
+                    try:
+                        safety = await check_safety_controls(db, org_id, profile, "email")
+                        safety_linkedin = await check_safety_controls(db, org_id, profile, "linkedin")
+                        safety_call = await check_safety_controls(db, org_id, profile, "call")
+                        if not safety["can_proceed"] and not safety_linkedin["can_proceed"] and not safety_call["can_proceed"]:
+                            logger.warning(f"All safety limits reached for org {org_id}. Sleeping.")
+                            break
 
-                    await _process_lead_autonomously(db, org_id, lead, profile, ai_key, campaign_context)
+                        await _process_lead_autonomously(db, org_id, lead, profile, ai_key, campaign_context)
+                    except Exception as e:
+                        logger.error(f"Error processing lead {lead.id}: {e}", exc_info=True)
+                        await _update_status(db, org_id, profile.id, "error",
+                                             current_action=f"Error processing lead {lead.id}: {str(e)[:100]}")
+                        await db.commit()
 
                 await _update_status(db, org_id, profile.id, "waiting_for_response",
                                      next_planned_action="Check replies and plan next outreach cycle")
@@ -651,30 +657,38 @@ async def _process_lead_autonomously(
                                 next_planned_action="Prepare for scheduled meeting and send reminder")
 
     elif action == "linkedin_like":
-        safety = await check_safety_controls(db, org_id, profile, "linkedin_like")
-        if not safety["can_proceed"]:
+        if not lead.linkedin_url:
             await _log_action(db, org_id, profile.id, lead.id, "linkedin_like", "linkedin",
-                              f"Safety limit: {safety['reasons']}", "Skipped", "skipped")
+                              "No LinkedIn URL available for this lead", "Skipped", "skipped")
         else:
-            await log_activity(db, org_id, profile.id, "linkedin_invite_generated",
-                               lead_id=lead.id, channel="linkedin",
-                               summary=f"Liked LinkedIn content from {lead_name}",
-                               reasoning=f"{reasoning}. Building awareness through social engagement")
-            result_text = await linkedin_like_tool(db, org_id, lead_data, profile, ai_key)
-            await _update_lead_state(db, org_id, lead.id, "follow_up", "linkedin")
+            safety = await check_safety_controls(db, org_id, profile, "linkedin_like")
+            if not safety["can_proceed"]:
+                await _log_action(db, org_id, profile.id, lead.id, "linkedin_like", "linkedin",
+                                  f"Safety limit: {safety['reasons']}", "Skipped", "skipped")
+            else:
+                await log_activity(db, org_id, profile.id, "linkedin_invite_generated",
+                                   lead_id=lead.id, channel="linkedin",
+                                   summary=f"Liked LinkedIn content from {lead_name}",
+                                   reasoning=f"{reasoning}. Building awareness through social engagement")
+                result_text = await linkedin_like_tool(db, org_id, lead_data, profile, ai_key)
+                await _update_lead_state(db, org_id, lead.id, "follow_up", "linkedin")
 
     elif action == "linkedin_comment":
-        safety = await check_safety_controls(db, org_id, profile, "linkedin_comment")
-        if not safety["can_proceed"]:
+        if not lead.linkedin_url:
             await _log_action(db, org_id, profile.id, lead.id, "linkedin_comment", "linkedin",
-                              f"Safety limit: {safety['reasons']}", "Skipped", "skipped")
+                              "No LinkedIn URL available for this lead", "Skipped", "skipped")
         else:
-            await log_activity(db, org_id, profile.id, "linkedin_invite_generated",
-                               lead_id=lead.id, channel="linkedin",
-                               summary=f"Commented on LinkedIn content from {lead_name}",
-                               reasoning=f"{reasoning}. Adding value through thoughtful engagement")
-            result_text = await linkedin_comment_tool(db, org_id, lead_data, profile, ai_key)
-            await _update_lead_state(db, org_id, lead.id, "follow_up", "linkedin")
+            safety = await check_safety_controls(db, org_id, profile, "linkedin_comment")
+            if not safety["can_proceed"]:
+                await _log_action(db, org_id, profile.id, lead.id, "linkedin_comment", "linkedin",
+                                  f"Safety limit: {safety['reasons']}", "Skipped", "skipped")
+            else:
+                await log_activity(db, org_id, profile.id, "linkedin_invite_generated",
+                                   lead_id=lead.id, channel="linkedin",
+                                   summary=f"Commented on LinkedIn content from {lead_name}",
+                                   reasoning=f"{reasoning}. Adding value through thoughtful engagement")
+                result_text = await linkedin_comment_tool(db, org_id, lead_data, profile, ai_key)
+                await _update_lead_state(db, org_id, lead.id, "follow_up", "linkedin")
 
     elif action == "follow_up":
         followup_type = await decide_followup_type(db, org_id, lead.id, profile,

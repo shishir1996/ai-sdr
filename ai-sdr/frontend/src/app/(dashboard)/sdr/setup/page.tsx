@@ -183,6 +183,8 @@ export default function SDRSetupPage() {
       provider: "smtp",
       host: smtpForm.host,
       port: smtpForm.port,
+      use_tls: smtpForm.port === 587,
+      use_ssl: smtpForm.port === 465,
       username: smtpForm.username,
       password: smtpForm.password,
       sender_email: smtpForm.sender_email,
