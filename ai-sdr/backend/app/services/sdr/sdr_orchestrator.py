@@ -214,7 +214,7 @@ async def _get_leads_needing_attention(db: AsyncSession, org_id: str, profile: S
     all_leads = result.scalars().all()
     state_result = await db.execute(select(LeadState).where(LeadState.org_id == org_id))
     states = {s.lead_id: s for s in state_result.scalars().all()}
-    RESEARCHED_DEBOUNCE = 300
+    RESEARCHED_DEBOUNCE = 60
     needs_attention = []
     for lead in all_leads:
         ls = states.get(lead.id)

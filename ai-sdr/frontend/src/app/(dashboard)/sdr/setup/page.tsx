@@ -60,6 +60,7 @@ export default function SDRSetupPage() {
 
   const [leadSources, setLeadSources] = useState<string[]>([])
   const [hasEmail, setHasEmail] = useState(false)
+  const [emailProvider, setEmailProvider] = useState("")
   const [hasLinkedin, setHasLinkedin] = useState(false)
 
   // Email connection state
@@ -113,6 +114,7 @@ export default function SDRSetupPage() {
         setLeadSources(sdr.lead_sources.split(",").filter(Boolean))
       }
       setHasEmail(sdr.has_email)
+      setEmailProvider(sdr.email_provider || "")
       setHasLinkedin(sdr.has_linkedin)
     } catch {}
   }
@@ -148,8 +150,6 @@ export default function SDRSetupPage() {
       const info = await api.get<{ auth_url: string }>(`/admin/integrations/${provider}/oauth/init`)
       if (info.auth_url) {
         window.open(info.auth_url, "_blank", "width=600,height=700")
-        if (provider === "gmail" || provider === "outlook") setHasEmail(true)
-        if (provider === "linkedin") setHasLinkedin(true)
       }
     } catch (e: any) {
       alert(e.message || `Cannot initiate ${provider} OAuth. Configure provider credentials in Admin Integrations panel first.`)
@@ -168,13 +168,15 @@ export default function SDRSetupPage() {
       payload.target_industries = ""
       payload.target_locations = ""
     }
-    if (sdrId) {
-      await api.put(`/sdr/profiles/${sdrId}`, payload)
+    let id = sdrId
+    if (id) {
+      await api.put(`/sdr/profiles/${id}`, payload)
     } else {
       const created = await api.post<any>("/sdr/profiles", payload)
-      setSdrId(created.id)
+      id = created.id
+      setSdrId(id)
     }
-    return sdrId
+    return id
   }
 
   const saveEmailCreds = async () => {
@@ -196,21 +198,23 @@ export default function SDRSetupPage() {
     }
     await api.put(`/sdr/profiles/${sdrId}/email-creds`, creds)
     setHasEmail(true)
+    setEmailProvider("smtp")
   }
 
   const saveAndNext = async () => {
     setSaving(true)
     try {
+      let id = sdrId
       if (step === 1 && emailMethod === "smtp") {
         if (!smtpForm.sender_email || !smtpForm.host || !smtpForm.username || !smtpForm.password) {
           alert("Please fill in all required SMTP fields (Sender Email, Host, Username, Password)")
           setSaving(false)
           return
         }
-        await saveSdr()
-        if (sdrId) await saveEmailCreds()
+        id = await saveSdr()
+        if (id) await saveEmailCreds()
       } else {
-        await saveSdr()
+        id = await saveSdr()
       }
 
       if (step === 2 && isManual && csvFile && !csvResult) {
@@ -220,7 +224,7 @@ export default function SDRSetupPage() {
       if (step < STEPS.length - 1) {
         setStep(step + 1)
       } else {
-        router.push(sdrId ? `/sdr/${sdrId}` : "/sdr")
+        router.push(id ? `/sdr/${id}` : "/sdr")
       }
     } catch (e: any) {
       console.error(e)
@@ -347,7 +351,7 @@ export default function SDRSetupPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {hasEmail ? (
+                  {emailProvider === "gmail" ? (
                     <span className="text-xs px-2.5 py-1 rounded-full bg-green-500/10 text-green-500 flex items-center gap-1">
                       <CheckCircle size={12} /> Connected
                     </span>
@@ -371,7 +375,7 @@ export default function SDRSetupPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {hasEmail ? (
+                  {emailProvider === "outlook" ? (
                     <span className="text-xs px-2.5 py-1 rounded-full bg-green-500/10 text-green-500 flex items-center gap-1">
                       <CheckCircle size={12} /> Connected
                     </span>
@@ -394,12 +398,20 @@ export default function SDRSetupPage() {
                     <p className="text-xs text-muted-foreground">For Hostinger, Zoho, cPanel, or custom mail servers</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setEmailMethod(emailMethod === "smtp" ? null : "smtp")}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${emailMethod === "smtp" ? "bg-amber-500/10 border-amber-500/30 text-amber-500" : "bg-white/10 border-white/20 hover:bg-white/20"}`}
-                >
-                  {emailMethod === "smtp" ? "Collapse" : "Configure"}
-                </button>
+                <div className="flex items-center gap-2">
+                  {emailProvider === "smtp" ? (
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-green-500/10 text-green-500 flex items-center gap-1">
+                      <CheckCircle size={12} /> Connected
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setEmailMethod(emailMethod === "smtp" ? null : "smtp")}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${emailMethod === "smtp" ? "bg-amber-500/10 border-amber-500/30 text-amber-500" : "bg-white/10 border-white/20 hover:bg-white/20"}`}
+                    >
+                      {emailMethod === "smtp" ? "Collapse" : "Configure"}
+                    </button>
+                  )}
+                </div>
               </div>
               {emailMethod === "smtp" && (<>
                 <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
@@ -466,8 +478,8 @@ export default function SDRSetupPage() {
                       }
                       setSaving(true)
                       try {
-                        await saveSdr()
-                        if (sdrId) await saveEmailCreds()
+                        const id = await saveSdr()
+                        if (id) await saveEmailCreds()
                         alert("SMTP configuration saved successfully!")
                       } catch (e: any) {
                         alert(e.message || "Failed to save SMTP configuration")
