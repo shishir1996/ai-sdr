@@ -29,7 +29,7 @@ interface DashboardData {
   call_outcomes: Record<string, number>
   total_campaigns: number
   active_campaigns: number
-  campaigns: { id: string; name: string; status: string; created_at: string }[]
+  campaigns: { id: string; name: string; status: string; created_at: string; sdr_name: string }[]
   total_deals: number
   won_deals: number
   won_deals_value: number
@@ -322,10 +322,13 @@ export default function DashboardPage() {
                 className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.04] transition-all duration-200 group cursor-default animate-in"
                 style={{ animationDelay: `${1.3 + i * 0.05}s` }}
               >
-                <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${c.status === "active" ? "bg-emerald-500 shadow-[0_0_8px_hsl(160,84%,50%)]" : "bg-gray-600"}`} />
-                  <span className="text-sm font-medium text-white/80">{c.name}</span>
-                </div>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${c.status === "active" ? "bg-emerald-500 shadow-[0_0_8px_hsl(160,84%,50%)]" : "bg-gray-600"}`} />
+                    <div>
+                      <span className="text-sm font-medium text-white/80">{c.name}</span>
+                      {c.sdr_name && <span className="text-xs text-muted-foreground ml-2">by {c.sdr_name}</span>}
+                    </div>
+                  </div>
                 <div className="flex items-center gap-3">
                   <span className={`text-xs px-2.5 py-1 rounded-lg font-medium ${
                     c.status === "active"

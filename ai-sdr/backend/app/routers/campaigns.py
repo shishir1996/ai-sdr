@@ -6,7 +6,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.models.user import User
-from app.models.agent import SDRProfile
+from app.models.agent import SDRProfile, LeadState
 from app.models.campaign import Campaign, CampaignStep, EmailTemplate, EmailMessage, CallScript
 from app.models.lead import Lead
 from sqlalchemy import func
@@ -222,6 +222,16 @@ async def get_campaigns_with_stats(
             if sdr:
                 sdr_name = sdr.name or "AI SDR"
 
+        leads_count = 0
+        if c.sdr_profile_id:
+            ls_count = await db.scalar(
+                select(func.count(LeadState.id)).where(
+                    LeadState.org_id == user.org_id,
+                    LeadState.sdr_profile_id == c.sdr_profile_id,
+                )
+            )
+            leads_count = ls_count or 0
+
         output.append({
             "id": c.id,
             "name": c.name,
@@ -239,7 +249,7 @@ async def get_campaigns_with_stats(
                 }
                 for s in steps
             ],
-            "leads_count": 0,
+            "leads_count": leads_count,
             "emails_sent": total_sent or 0,
             "emails_opened": total_opened or 0,
             "emails_replied": total_replied or 0,

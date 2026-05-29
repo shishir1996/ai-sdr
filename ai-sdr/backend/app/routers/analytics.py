@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.lead import Lead
 from app.models.campaign import Campaign, CampaignStep, EmailMessage, CallLog
 from app.models.deal import Deal, DealStage
-from app.models.agent import AgentLog, LeadState
+from app.models.agent import AgentLog, LeadState, SDRProfile
 from app.utils.auth import get_current_user
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -127,20 +127,25 @@ async def get_dashboard(
         select(func.count(Campaign.id)).where(Campaign.org_id == org_id, Campaign.status == "active")
     )
     campaign_result = await db.execute(
-        select(Campaign.id, Campaign.name, Campaign.status, Campaign.created_at)
+        select(Campaign.id, Campaign.name, Campaign.status, Campaign.created_at, Campaign.sdr_profile_id)
         .where(Campaign.org_id == org_id)
         .order_by(Campaign.created_at.desc())
         .limit(10)
     )
-    campaigns_list = [
-        {
+    campaigns_list = []
+    for row in campaign_result:
+        sdr_name = ""
+        if row[4]:
+            sdr_res = await db.execute(select(SDRProfile.name).where(SDRProfile.id == row[4]))
+            sdr = sdr_res.scalar_one_or_none()
+            sdr_name = sdr or ""
+        campaigns_list.append({
             "id": row[0],
             "name": row[1],
             "status": row[2],
             "created_at": row[3].isoformat() if row[3] else None,
-        }
-        for row in campaign_result
-    ]
+            "sdr_name": sdr_name,
+        })
 
     # SDR activity
     sdr_actions_result = await db.execute(
