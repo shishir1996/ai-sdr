@@ -208,6 +208,9 @@ async def _get_leads_needing_attention(db: AsyncSession, org_id: str, profile: S
             lead_sources = json.loads(profile.lead_sources)
         except Exception:
             lead_sources = [s.strip() for s in profile.lead_sources.split(",") if s.strip()]
+
+    logger.info(f"[_get_leads_needing_attention] org={org_id} profile_lead_sources={profile.lead_sources!r} parsed={lead_sources}")
+
     query = select(Lead).where(Lead.org_id == org_id)
     if lead_sources:
         from sqlalchemy import or_
@@ -220,29 +223,58 @@ async def _get_leads_needing_attention(db: AsyncSession, org_id: str, profile: S
                 expanded.append("apollo_auto")
         source_filters = [Lead.source == s for s in expanded]
         query = query.where(or_(*source_filters))
+        logger.info(f"[_get_leads_needing_attention] filtering by source: {expanded}")
+
+    count_q = await db.execute(select(Lead).where(Lead.org_id == org_id))
+    all_leads_count = len(count_q.scalars().all())
+    logger.info(f"[_get_leads_needing_attention] total leads in org: {all_leads_count}")
+
     query = query.order_by(Lead.created_at.desc()).limit(50)
     result = await db.execute(query)
     all_leads = result.scalars().all()
+    logger.info(f"[_get_leads_needing_attention] leads after source filter: {len(all_leads)}")
+    for l in all_leads:
+        logger.info(f"[_get_leads_needing_attention]   lead id={l.id} email={l.email} source={l.source}")
+
     state_result = await db.execute(select(LeadState).where(LeadState.org_id == org_id))
     states = {s.lead_id: s for s in state_result.scalars().all()}
+    logger.info(f"[_get_leads_needing_attention] total lead_states in org: {len(states)}")
+    for lid, ls in states.items():
+        logger.info(f"[_get_leads_needing_attention]   state lead={lid} state={ls.state} paused={ls.is_paused}")
+
     RESEARCHED_DEBOUNCE = 60
     needs_attention = []
+
     for lead in all_leads:
         ls = states.get(lead.id)
+
         if ls and ls.is_paused:
             continue
+
         if not ls or ls.state == "new":
             needs_attention.append(lead)
+            logger.info(f"[_get_leads_needing_attention] lead {lead.id} INCLUDED: no state or state=new")
+
         elif ls.state == "follow_up":
             needs_attention.append(lead)
+            logger.info(f"[_get_leads_needing_attention] lead {lead.id} INCLUDED: follow_up")
+
         elif ls.state == "researched":
             delta = _now() - (ls.last_contacted_at or lead.created_at)
             if delta.total_seconds() > RESEARCHED_DEBOUNCE:
                 needs_attention.append(lead)
+                logger.info(f"[_get_leads_needing_attention] lead {lead.id} INCLUDED: researched past debounce ({delta.total_seconds()}s)")
+            else:
+                logger.info(f"[_get_leads_needing_attention] lead {lead.id} SKIPPED: researched within debounce ({delta.total_seconds()}s)")
+
         elif ls.state not in ("closed_won", "closed_lost", "archived", "meeting_scheduled", "payment_sent"):
             delta = _now() - (ls.last_contacted_at or lead.created_at)
             if delta.total_seconds() > 86400:
                 needs_attention.append(lead)
+            else:
+                logger.info(f"[_get_leads_needing_attention] lead {lead.id} SKIPPED: state={ls.state} within 24h debounce")
+
+    logger.info(f"[_get_leads_needing_attention] returning {len(needs_attention)} leads needing attention")
     return needs_attention[:5]
 
 
