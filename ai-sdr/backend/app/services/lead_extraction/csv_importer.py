@@ -59,7 +59,7 @@ def parse_csv(content: Any) -> list[dict[str, Any]]:
             canonical = col_map.get(csv_col, csv_col)
             lead[canonical] = val.strip()
 
-        lead.setdefault("source", "csv")
+        lead.setdefault("source", "manual")
         if lead.get("email") or lead.get("first_name") or lead.get("company"):
             leads.append(lead)
     return leads

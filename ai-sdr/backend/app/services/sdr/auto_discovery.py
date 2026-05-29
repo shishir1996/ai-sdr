@@ -70,7 +70,7 @@ async def auto_discover_leads(
             industry=c.get("industry", ""),
             location=c.get("location", ""),
             company_size=c.get("company_size", ""),
-            source="apollo_auto",
+            source="apollo",
             status="new",
         )
         db.add(lead)
