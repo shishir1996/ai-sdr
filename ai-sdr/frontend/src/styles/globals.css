@@ -309,6 +309,38 @@
   background: hsl(224 30% 28%);
 }
 
+/* 3D perspective utilities */
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+.perspective-1000 {
+  perspective: 1000px;
+}
+.perspective-1200 {
+  perspective: 1200px;
+}
+
+/* Backface visibility */
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+/* GPU acceleration */
+.gpu {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Spin animation for loading */
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
