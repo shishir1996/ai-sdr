@@ -214,6 +214,14 @@ async def _get_profile(db: AsyncSession, org_id: str) -> Optional[SDRProfile]:
 
 
 async def _get_leads_needing_attention(db: AsyncSession, org_id: str, profile: SDRProfile) -> list[Lead]:
+    try:
+        return await _get_leads_needing_attention_inner(db, org_id, profile)
+    except Exception as e:
+        logger.error(f"[_get_leads_needing_attention] CRASHED: {e}", exc_info=True)
+        return []
+
+
+async def _get_leads_needing_attention_inner(db: AsyncSession, org_id: str, profile: SDRProfile) -> list[Lead]:
     lead_sources = []
     if profile.lead_sources:
         try:
