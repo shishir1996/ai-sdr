@@ -1,7 +1,7 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Optional
 
@@ -911,3 +911,47 @@ async def emergency_stop(
     await db.flush()
 
     return {"status": "emergency_stop_executed"}
+
+
+@router.get("/diagnostics")
+async def sdr_diagnostics(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.org_id == user.org_id)
+    )
+    profiles = result.scalars().all()
+    profile_data = []
+    for p in profiles:
+        profile_data.append({
+            "id": p.id,
+            "name": p.name,
+            "is_active": p.is_active,
+            "lead_sources": p.lead_sources,
+            "has_email_creds": bool(p.email_credentials_encrypted),
+        })
+
+    lead_count = await db.scalar(select(func.count(Lead.id)).where(Lead.org_id == user.org_id))
+    lead_sources_q = await db.execute(
+        select(Lead.source, func.count(Lead.id)).where(Lead.org_id == user.org_id).group_by(Lead.source)
+    )
+    lead_sources = {row[0]: row[1] for row in lead_sources_q.fetchall()}
+
+    state_count = await db.scalar(select(func.count(LeadState.id)).where(LeadState.org_id == user.org_id))
+    state_breakdown_q = await db.execute(
+        select(LeadState.state, func.count(LeadState.id)).where(LeadState.org_id == user.org_id).group_by(LeadState.state)
+    )
+    state_breakdown = {row[0]: row[1] for row in state_breakdown_q.fetchall()}
+
+    return {
+        "profiles": profile_data,
+        "leads": {
+            "total": lead_count or 0,
+            "by_source": lead_sources,
+        },
+        "lead_states": {
+            "total": state_count or 0,
+            "by_state": state_breakdown,
+        },
+    }
