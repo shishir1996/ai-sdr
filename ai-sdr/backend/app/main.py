@@ -28,6 +28,8 @@ from app.routers.calendar import router as calendar_router
 from app.services.feature_flag.service import seed_feature_flags
 from app.services.security.middleware import SecurityHeadersMiddleware
 from app.services.redis_service import init_redis
+from app.models.agent import SDRProfile
+from sqlalchemy import select
 
 settings = get_settings()
 
@@ -40,6 +42,16 @@ async def lifespan(app: FastAPI):
     async with async_session_factory() as db:
         await seed_feature_flags(db)
         await db.commit()
+
+        result = await db.execute(
+            select(SDRProfile).where(SDRProfile.is_active.is_(True))
+        )
+        active_profiles = result.scalars().all()
+    for profile in active_profiles:
+        import asyncio
+        from app.services.sdr.sdr_orchestrator import start_sdr_cycle
+        print(f"[startup] Restarting SDR cycle for {profile.name} (org={profile.org_id})", flush=True)
+        asyncio.create_task(start_sdr_cycle(profile.org_id, sdr_profile_id=profile.id))
     yield
 
 
