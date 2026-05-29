@@ -136,6 +136,10 @@ async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
                 leads = await _get_leads_needing_attention(db, org_id, profile)
                 logger.info(f"SDR cycle: {len(leads)} leads need attention")
 
+                if not leads:
+                    await _update_status(db, org_id, profile.id, "idle",
+                                         current_action="No leads to process. Import leads via CSV or configure lead sources.")
+
                 for lead in leads:
                     try:
                         safety = await check_safety_controls(db, org_id, profile, "email")
@@ -207,7 +211,14 @@ async def _get_leads_needing_attention(db: AsyncSession, org_id: str, profile: S
     query = select(Lead).where(Lead.org_id == org_id)
     if lead_sources:
         from sqlalchemy import or_
-        source_filters = [Lead.source == s for s in lead_sources]
+        expanded = []
+        for s in lead_sources:
+            expanded.append(s)
+            if s == "manual":
+                expanded.append("csv")
+            elif s == "apollo":
+                expanded.append("apollo_auto")
+        source_filters = [Lead.source == s for s in expanded]
         query = query.where(or_(*source_filters))
     query = query.order_by(Lead.created_at.desc()).limit(50)
     result = await db.execute(query)
