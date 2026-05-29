@@ -166,13 +166,24 @@ async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
                 await _update_status(db, org_id, profile.id, "waiting_for_response",
                                      next_planned_action="Check replies and plan next outreach cycle")
 
-                await _check_campaign_completion(db, org_id, profile, active_campaign_obj)
+                try:
+                    await _check_campaign_completion(db, org_id, profile, active_campaign_obj)
+                except Exception as e:
+                    logger.error(f"Campaign completion check failed: {e}")
 
                 await db.commit()
 
             await asyncio.sleep(30)
     except Exception as e:
         logger.error(f"SDR cycle error: {e}", exc_info=True)
+        try:
+            async with async_session_factory() as db:
+                if sdr_profile_id:
+                    await _update_status(db, org_id, sdr_profile_id, "error",
+                                         current_action=f"SDR cycle error: {str(e)[:100]}")
+                await db.commit()
+        except Exception:
+            pass
     finally:
         _running_cycles.discard(cycle_key)
         logger.info(f"SDR cycle ended for {cycle_key}")
@@ -218,6 +229,10 @@ async def _get_leads_needing_attention(db: AsyncSession, org_id: str, profile: S
         return await _get_leads_needing_attention_inner(db, org_id, profile)
     except Exception as e:
         logger.error(f"[_get_leads_needing_attention] CRASHED: {e}", exc_info=True)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
         return []
 
 
@@ -405,13 +420,13 @@ async def _update_lead_state(
         db.add(ls)
     else:
         ls.state = new_state
+    ls.last_contacted_at = _now()
     if channel:
         used = list(ls.channels_used or [])
         if channel not in used:
             used.append(channel)
             ls.channels_used = used
         ls.contact_count = (ls.contact_count or 0) + 1
-        ls.last_contacted_at = _now()
     await db.flush()
 
 
