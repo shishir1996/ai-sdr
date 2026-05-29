@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session_factory
 from app.models.agent import SDRProfile, LeadState, AgentLog
 from app.models.lead import Lead
-from app.models.campaign import Campaign, CampaignStep
+from app.models.campaign import Campaign, CampaignStep, EmailMessage
 from app.services.ai.model_client import generate_text
 from app.services.integrations.resolver import resolve_api_key, resolve_api_secret, resolve_refresh_token
 from app.services.sdr.auto_discovery import auto_discover_leads
@@ -159,6 +159,8 @@ async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
                 await _update_status(db, org_id, profile.id, "waiting_for_response",
                                      next_planned_action="Check replies and plan next outreach cycle")
 
+                await _check_campaign_completion(db, org_id, profile, active_campaign_obj)
+
                 await db.commit()
 
             await asyncio.sleep(30)
@@ -274,8 +276,50 @@ async def _get_leads_needing_attention(db: AsyncSession, org_id: str, profile: S
             else:
                 logger.info(f"[_get_leads_needing_attention] lead {lead.id} SKIPPED: state={ls.state} within 24h debounce")
 
-    logger.info(f"[_get_leads_needing_attention] returning {len(needs_attention)} leads needing attention")
+    logger.info(f"[_get_leads_needing_attention] returning {len(needs_attention)} leads needing attention (before opened-but-no-reply boost)")
+
+    opened_unreplied = await db.execute(
+        select(EmailMessage.lead_id).where(
+            EmailMessage.org_id == org_id,
+            EmailMessage.opened_at.isnot(None),
+            EmailMessage.replied_at.is_(None),
+            EmailMessage.direction == "outbound",
+        )
+    )
+    opened_lead_ids = {row[0] for row in opened_unreplied.fetchall() if row[0]}
+    existing_ids = {l.id for l in needs_attention}
+    for lead in all_leads:
+        if lead.id in opened_lead_ids and lead.id not in existing_ids:
+            ls = states.get(lead.id)
+            if ls and ls.state not in ("closed_won", "closed_lost", "archived", "meeting_scheduled", "payment_sent"):
+                needs_attention.insert(0, lead)
+                logger.info(f"[_get_leads_needing_attention] lead {lead.id} BOOSTED (opened email, no reply)")
+
+    logger.info(f"[_get_leads_needing_attention] returning {len(needs_attention)} leads needing attention (after boost)")
     return needs_attention[:5]
+
+
+async def _check_campaign_completion(
+    db: AsyncSession, org_id: str, profile: SDRProfile, campaign: Optional[Campaign],
+):
+    if not campaign or campaign.status != "active":
+        return
+    ls_result = await db.execute(
+        select(LeadState).where(
+            LeadState.org_id == org_id,
+            LeadState.sdr_profile_id == profile.id,
+        )
+    )
+    all_states = ls_result.scalars().all()
+    if not all_states:
+        return
+    terminal = {"closed_won", "closed_lost", "archived", "meeting_scheduled", "payment_sent"}
+    all_terminal = all(ls.state in terminal for ls in all_states)
+    if all_terminal:
+        campaign.status = "completed"
+        logger.info(f"Campaign {campaign.id} auto-completed (all leads in terminal states)")
+        await _log_system_action(db, org_id, profile.id, None, "campaign_completed", None,
+                                 f"Campaign '{campaign.name}' completed — all leads in terminal states")
 
 
 async def _log_action(
