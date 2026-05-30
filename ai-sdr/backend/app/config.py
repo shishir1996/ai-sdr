@@ -105,25 +105,14 @@ def get_settings() -> Settings:
     kwargs = {}
     if env_file:
         kwargs["_env_file"] = env_file
-    s = Settings(**kwargs)
-    # Debug: log raw env var value
-    _raw_db = os.environ.get("DATABASE_URL")
-    import logging as _log
-    _log.getLogger(__name__).info("=== [DEBUG] os.environ DATABASE_URL=%s ===", _raw_db)
-    _log.getLogger(__name__).info("=== [DEBUG] RAILWAY_SERVICE_ID=%s ===", os.environ.get("RAILWAY_SERVICE_ID"))
-    _log.getLogger(__name__).info("=== [DEBUG] pydantic DATABASE_URL=%s ===", s.DATABASE_URL)
-    # Railway injects DATABASE_URL and other env vars at the OS level.
-    # Explicitly apply them to override defaults in case pydantic-settings
-    # doesn't pick them up (observed on Railway deploys).
-    _DB_KEY = "DATABASE_URL"
-    if _DB_KEY in os.environ:
-        object.__setattr__(s, _DB_KEY, os.environ[_DB_KEY])
-    _DB_SYNC_KEY = "DATABASE_URL_SYNC"
-    if _DB_SYNC_KEY in os.environ:
-        object.__setattr__(s, _DB_SYNC_KEY, os.environ[_DB_SYNC_KEY])
-    # Also force-apply SUPABASE_* and SECRET_KEY so auth works reliably
-    for key in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY",
-                "SECRET_KEY", "FRONTEND_URL", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
-        if key in os.environ:
-            object.__setattr__(s, key, os.environ[key])
-    return s
+    # Force settings from os.environ regardless of pydantic-settings behavior
+    for _key in (
+        "DATABASE_URL", "DATABASE_URL_SYNC",
+        "SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY",
+        "SECRET_KEY", "FRONTEND_URL", "IS_PRODUCTION",
+        "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+    ):
+        _val = os.environ.get(_key)
+        if _val is not None:
+            kwargs[_key] = _val
+    return Settings(**kwargs)
