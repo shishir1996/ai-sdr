@@ -1,10 +1,12 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 import os
 from typing import Optional
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(case_sensitive=True)
+
     APP_NAME: str = "AI SDR"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
@@ -82,11 +84,24 @@ class Settings(BaseSettings):
     # Sentry
     SENTRY_DSN: str = ""
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+
+def _choose_env_file() -> str:
+    """Pick the right env file based on environment."""
+    # Railway or production: prefer .env.production, fall back to .env
+    if os.getenv("RAILWAY_SERVICE_ID") or os.getenv("IS_PRODUCTION") == "true":
+        prod_env = os.path.join(os.path.dirname(__file__), "..", ".env.production")
+        if os.path.exists(prod_env):
+            return prod_env
+    # Local dev
+    local_env = os.path.join(os.path.dirname(__file__), "..", ".env")
+    if os.path.exists(local_env):
+        return local_env
+    return ""
 
 
 @lru_cache()
 def get_settings() -> Settings:
+    env_file = _choose_env_file()
+    if env_file:
+        return Settings(_env_file=env_file)
     return Settings()
