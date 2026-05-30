@@ -1,10 +1,13 @@
 import json
 import logging
-from datetime import datetime, timezone
+import itertools
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+
+_timestamp_counter = itertools.count(start=1)
 
 from app.models.agent_activity import (
     AgentActivity, SDRReasoningLog, CampaignEvent,
@@ -17,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    offset = next(_timestamp_counter)
+    return datetime.now(timezone.utc) + timedelta(microseconds=offset)
 
 
 async def log_activity(
@@ -51,6 +55,7 @@ async def log_activity(
         next_planned_action=next_planned_action,
         confidence_score=confidence_score,
         is_expandable=is_expandable,
+        created_at=_now(),
     )
     db.add(activity)
     await db.flush()

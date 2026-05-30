@@ -146,6 +146,7 @@ async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
                     await _update_status(db, org_id, profile.id, "idle",
                                          current_action="No leads to process. Import leads via CSV or configure lead sources.")
 
+                outreach_performed = False
                 for lead in leads:
                     try:
                         safety = await check_safety_controls(db, org_id, profile, "email")
@@ -155,15 +156,22 @@ async def start_sdr_cycle(org_id: str, sdr_profile_id: Optional[str] = None):
                             logger.warning(f"All safety limits reached for org {org_id}. Sleeping.")
                             break
 
-                        await _process_lead_autonomously(db, org_id, lead, profile, ai_key, campaign_context)
+                        result = await _process_lead_autonomously(db, org_id, lead, profile, ai_key, campaign_context)
+                        if result:
+                            outreach_performed = True
                     except Exception as e:
                         logger.error(f"Error processing lead {lead.id}: {e}", exc_info=True)
                         await _update_status(db, org_id, profile.id, "error",
                                              current_action=f"Error processing lead {lead.id}: {str(e)[:100]}")
                         await db.commit()
 
-                await _update_status(db, org_id, profile.id, "waiting_for_response",
-                                     next_planned_action="Check replies and plan next outreach cycle")
+                if outreach_performed:
+                    await _update_status(db, org_id, profile.id, "waiting_for_response",
+                                         next_planned_action="Check replies and plan next outreach cycle")
+                elif leads:
+                    await _update_status(db, org_id, profile.id, "idle",
+                                         current_action="Leads processed, waiting for new signals or next cycle",
+                                         next_planned_action="Re-check leads at next cycle")
 
                 try:
                     await _check_campaign_completion(db, org_id, profile, active_campaign_obj)
@@ -440,12 +448,14 @@ async def _process_lead_autonomously(
     profile: SDRProfile,
     ai_key: Optional[str],
     campaign_context: str = "",
-):
+) -> bool:
+    """Returns True if any outreach action was performed (email/LinkedIn sent, call made)."""
     result = await db.execute(
         select(LeadState).where(LeadState.org_id == org_id, LeadState.lead_id == lead.id)
     )
     ls = result.scalar_one_or_none()
     state = ls.state if ls else "new"
+    is_first_analysis = state == "new"
 
     lead_data = {
         "id": lead.id,
@@ -539,11 +549,14 @@ async def _process_lead_autonomously(
         await _update_lead_state(db, org_id, lead.id, "researching")
         await _update_status(db, org_id, profile.id, "analyzing",
                              current_action=f"Analyzing {lead_name}")
-        await log_activity(db, org_id, profile.id, "lead_analyzed",
-                           lead_id=lead.id,
-                           summary=f"Analyzing {lead_name} for personalization",
-                           reasoning=reasoning,
-                           next_planned_action="Extract personalization hooks and prepare outreach strategy")
+
+        # Only log activity for first-time analysis to keep feed clean
+        if is_first_analysis:
+            await log_activity(db, org_id, profile.id, "lead_analyzed",
+                               lead_id=lead.id,
+                               summary=f"Analyzing {lead_name} for personalization",
+                               reasoning=reasoning,
+                               next_planned_action="Extract personalization hooks and prepare outreach strategy")
 
         deep_analysis = {}
         if lead.email:
@@ -557,18 +570,20 @@ async def _process_lead_autonomously(
         await _update_lead_state(db, org_id, lead.id, "researched")
         hooks = deep_analysis.get("personalization_hooks", [])
         pain_points = deep_analysis.get("likely_pain_points", [])
-        await log_activity(db, org_id, profile.id, "lead_analyzed",
-                           lead_id=lead.id,
-                           summary=f"Analysis complete for {lead_name}" if lead.email else f"Basic analysis for {lead_name} (no email for deep analysis)",
-                           reasoning=f"Found {len(hooks)} personalization hooks. Key pain points: {pain_points[:2]}" if lead.email else "No email for deep analysis",
-                           details={"personalization_hooks": hooks[:5], "company_analysis": deep_analysis.get("company", "")} if lead.email else {"note": "No email available for enrichment"},
-                           next_planned_action="Begin targeted outreach based on analysis insights",
-                           is_expandable=True,
-                           confidence_score=82 if lead.email else 40)
-        await log_lead_timeline(db, org_id, lead.id, "researched",
-                                sdr_profile_id=profile.id,
-                                summary=f"Lead analyzed - {len(hooks)} personalization hooks identified" if lead.email else "Lead noted (no email for analysis)",
-                                reasoning=f"Pain points: {pain_points[:2]}" if lead.email else "No email available")
+
+        if is_first_analysis:
+            await log_activity(db, org_id, profile.id, "lead_analyzed",
+                               lead_id=lead.id,
+                               summary=f"Analysis complete for {lead_name}" if lead.email else f"Basic analysis for {lead_name} (no email for deep analysis)",
+                               reasoning=f"Found {len(hooks)} personalization hooks. Key pain points: {pain_points[:2]}" if lead.email else "No email for deep analysis",
+                               details={"personalization_hooks": hooks[:5], "company_analysis": deep_analysis.get("company", "")} if lead.email else {"note": "No email available for enrichment"},
+                               next_planned_action="Begin targeted outreach based on analysis insights",
+                               is_expandable=True,
+                               confidence_score=82 if lead.email else 40)
+            await log_lead_timeline(db, org_id, lead.id, "researched",
+                                    sdr_profile_id=profile.id,
+                                    summary=f"Lead analyzed - {len(hooks)} personalization hooks identified" if lead.email else "Lead noted (no email for analysis)",
+                                    reasoning=f"Pain points: {pain_points[:2]}" if lead.email else "No email available")
 
     elif action == "send_email" and lead.email:
         safety = await check_safety_controls(db, org_id, profile, "email")
@@ -852,3 +867,4 @@ async def _process_lead_autonomously(
                           f"Action deferred: {reasoning}", "Deferred", "pending")
 
     await db.commit()
+    return action in ("send_email", "send_linkedin", "make_call")
