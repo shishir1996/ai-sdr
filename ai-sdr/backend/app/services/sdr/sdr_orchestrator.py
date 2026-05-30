@@ -7,6 +7,8 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.email.reply_detector import check_email_replies as _check_email_replies_sync
+
 from app.database import async_session_factory
 from app.models.agent import SDRProfile, LeadState, AgentLog
 from app.models.lead import Lead
@@ -15,7 +17,6 @@ from app.services.integrations.resolver import resolve_api_key, resolve_api_secr
 from app.services.sdr.auto_discovery import auto_discover_leads
 from app.services.lead_extraction.web_scraper import scrape_and_create_lead
 from app.services.sdr.rate_limiter import rate_limiter
-from app.services.email.reply_detector import check_email_replies
 from app.services.email.reply_handler import handle_reply
 from app.services.sdr.credentials import decrypt_sdr_credentials
 from app.services.sdr.sdr_campaign_intelligence import design_and_create_campaign
@@ -491,7 +492,8 @@ async def _process_lead_autonomously(
     gmail_refresh = await resolve_refresh_token(db, org_id, "gmail")
     sdr_email_creds = decrypt_sdr_credentials(profile.email_credentials_encrypted) if profile.email_credentials_encrypted else None
     if lead.email:
-        replies = check_email_replies(
+        replies = await asyncio.to_thread(
+            _check_email_replies_sync,
             lead_email=lead.email,
             since=ls.last_contacted_at if ls else None,
             gmail_client_id=gmail_client_id,
