@@ -156,22 +156,22 @@ function PasswordStrength({ password }: { password: string }) {
           />
         ))}
       </div>
-      <ul className="space-y-1">
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5">
         {checks.map((check, i) => (
-          <motion.li
+          <motion.span
             key={i}
             initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.05 }}
-            className={`flex items-center gap-2 text-xs transition-colors ${
+            className={`flex items-center gap-1 text-[11px] transition-colors ${
               check.pass ? "text-emerald-400" : "text-gray-500"
             }`}
           >
-            {check.pass ? <Check size={12} /> : <X size={12} />}
+            {check.pass ? <Check size={10} /> : <X size={10} />}
             {check.label}
-          </motion.li>
+          </motion.span>
         ))}
-      </ul>
+      </div>
     </motion.div>
   )
 }
