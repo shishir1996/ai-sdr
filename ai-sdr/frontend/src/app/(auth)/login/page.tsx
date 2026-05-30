@@ -258,7 +258,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[hsl(224,45%,4%)] overflow-hidden">
+    <div className="min-h-screen lg:h-screen flex bg-[hsl(224,45%,4%)] overflow-hidden">
 
       {/* ─── Left Panel (brand) ─── */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-gradient-to-br from-[hsl(224,45%,6%)] via-[hsl(224,40%,8%)] to-[hsl(224,45%,4%)]">
@@ -355,7 +355,7 @@ export default function LoginPage() {
       </div>
 
       {/* ─── Right Panel (form) ─── */}
-      <div className="flex-1 flex items-center justify-center px-4 sm:px-6 py-12 relative overflow-hidden">
+      <div className="flex-1 flex items-center justify-center px-4 sm:px-6 py-6 lg:py-0 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-radial opacity-20" />
         <div className="absolute inset-0 bg-grid opacity-10" />
         <FloatingParticles count={15} />
@@ -379,12 +379,12 @@ export default function LoginPage() {
           </div>
 
           <TiltCard>
-            <div className="glass-card rounded-2xl p-8 md:p-10 glow relative overflow-hidden">
+            <div className="glass-card rounded-2xl p-6 md:p-8 glow relative overflow-hidden">
               <FloatingParticles count={10} />
               <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-500 via-violet-500 to-indigo-500" />
 
               {/* Tabs */}
-              <div className="flex bg-white/5 rounded-xl p-1 mb-8">
+              <div className="flex bg-white/5 rounded-xl p-1 mb-6">
                 {[
                   { key: false, label: "Sign In" },
                   { key: true, label: "Sign Up" },
@@ -526,7 +526,7 @@ export default function LoginPage() {
                     )}
                   </button>
 
-                  <div className="relative my-6">
+                  <div className="relative my-4">
                     <div className="absolute inset-0 flex items-center">
                       <div className="w-full border-t border-white/10" />
                     </div>
