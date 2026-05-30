@@ -7,6 +7,9 @@ interface User {
   name: string
   role: string
   org_id: string
+  phone?: string | null
+  country_code?: string | null
+  email_verified?: boolean
 }
 
 export function useAuth() {
@@ -41,9 +44,16 @@ export function useAuth() {
     setUser(me)
   }, [])
 
-  const signup = useCallback(async (name: string, email: string, password: string, orgName: string) => {
+  const signup = useCallback(async (
+    name: string,
+    email: string,
+    password: string,
+    orgName: string,
+    phone?: string,
+    countryCode?: string,
+  ) => {
     const data = await api.post<{ access_token: string; refresh_token: string }>("/auth/signup", {
-      name, email, password, org_name: orgName,
+      name, email, password, org_name: orgName, phone, country_code: countryCode,
     })
     api.setToken(data.access_token)
     localStorage.setItem("access_token", data.access_token)
@@ -61,5 +71,22 @@ export function useAuth() {
     setUser(null)
   }, [])
 
-  return { user, loading, login, signup, logout }
+  const forgotPassword = useCallback(async (email: string) => {
+    return api.post<{ message: string }>("/auth/forgot-password", { email })
+  }, [])
+
+  const resetPassword = useCallback(async (accessToken: string, newPassword: string) => {
+    return api.post<{ message: string }>("/auth/reset-password", {
+      access_token: accessToken,
+      new_password: newPassword,
+    })
+  }, [])
+
+  const updateProfile = useCallback(async (data: { name?: string; phone?: string; country_code?: string }) => {
+    const updated = await api.put<User>("/auth/profile", data)
+    setUser((prev) => prev ? { ...prev, ...updated } : null)
+    return updated
+  }, [])
+
+  return { user, loading, login, signup, logout, forgotPassword, resetPassword, updateProfile }
 }

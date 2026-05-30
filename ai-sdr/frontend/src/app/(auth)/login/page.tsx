@@ -2,12 +2,60 @@
 
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useAuth } from "@/hooks/useAuth"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Building2, Sparkles, Mail, Lock, User, Globe, ArrowRight, Linkedin,
-  Eye, EyeOff, Check, X, ChevronRight, Shield, Zap,
+  Eye, EyeOff, Check, X, ChevronRight, Shield, Zap, Phone,
 } from "lucide-react"
+/* ─── Country codes ─── */
+const COUNTRY_CODES = [
+  { code: "+1", label: "US +1" },
+  { code: "+44", label: "UK +44" },
+  { code: "+91", label: "IN +91" },
+  { code: "+61", label: "AU +61" },
+  { code: "+1", label: "CA +1" },
+  { code: "+49", label: "DE +49" },
+  { code: "+33", label: "FR +33" },
+  { code: "+81", label: "JP +81" },
+  { code: "+86", label: "CN +86" },
+  { code: "+55", label: "BR +55" },
+  { code: "+971", label: "AE +971" },
+  { code: "+65", label: "SG +65" },
+  { code: "+852", label: "HK +852" },
+  { code: "+82", label: "KR +82" },
+  { code: "+34", label: "ES +34" },
+  { code: "+39", label: "IT +39" },
+  { code: "+7", label: "RU +7" },
+  { code: "+52", label: "MX +52" },
+  { code: "+31", label: "NL +31" },
+  { code: "+46", label: "SE +46" },
+  { code: "+41", label: "CH +41" },
+  { code: "+47", label: "NO +47" },
+  { code: "+45", label: "DK +45" },
+  { code: "+358", label: "FI +358" },
+  { code: "+353", label: "IE +353" },
+  { code: "+64", label: "NZ +64" },
+  { code: "+27", label: "ZA +27" },
+  { code: "+54", label: "AR +54" },
+  { code: "+56", label: "CL +56" },
+  { code: "+57", label: "CO +57" },
+  { code: "+60", label: "MY +60" },
+  { code: "+63", label: "PH +63" },
+  { code: "+62", label: "ID +62" },
+  { code: "+66", label: "TH +66" },
+  { code: "+84", label: "VN +84" },
+  { code: "+90", label: "TR +90" },
+  { code: "+48", label: "PL +48" },
+  { code: "+30", label: "GR +30" },
+  { code: "+351", label: "PT +351" },
+  { code: "+972", label: "IL +972" },
+  { code: "+966", label: "SA +966" },
+  { code: "+20", label: "EG +20" },
+  { code: "+234", label: "NG +234" },
+  { code: "+254", label: "KE +254" },
+]
+
 /* ─── Performance helpers ─── */
 function isTouchDevice() {
   if (typeof window === "undefined") return false
@@ -202,6 +250,58 @@ function TiltCard({ children }: { children: React.ReactNode }) {
   )
 }
 
+/* ─── Country Code Select ─── */
+function CountryCodeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [])
+
+  const selected = COUNTRY_CODES.find((c) => c.code === value) || COUNTRY_CODES[0]
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 h-full px-3 bg-white/5 border border-white/10 rounded-l-xl text-white text-sm hover:bg-white/10 transition-colors whitespace-nowrap"
+        data-cursor-hover
+      >
+        <Globe size={14} className="text-gray-400" />
+        <span>{selected.code}</span>
+        <ChevronRight size={12} className={`text-gray-500 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="absolute bottom-full left-0 mb-1 w-36 max-h-48 overflow-y-auto bg-[hsl(224,45%,10%)] border border-white/10 rounded-xl shadow-xl z-50 scrollbar-thin"
+        >
+          {COUNTRY_CODES.map((cc) => (
+            <button
+              key={`${cc.code}-${cc.label}`}
+              type="button"
+              onClick={() => { onChange(cc.code); setOpen(false) }}
+              className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${
+                value === cc.code ? "text-purple-400 bg-purple-500/10" : "text-gray-400 hover:text-white hover:bg-white/5"
+              }`}
+              data-cursor-hover
+            >
+              {cc.label}
+            </button>
+          ))}
+        </motion.div>
+      )}
+    </div>
+  )
+}
+
 /* ─── Login Page ─── */
 export default function LoginPage() {
   const [isSignup, setIsSignup] = useState(false)
@@ -209,12 +309,22 @@ export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [orgName, setOrgName] = useState("")
+  const [phone, setPhone] = useState("")
+  const [countryCode, setCountryCode] = useState("+1")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [verifiedMessage, setVerifiedMessage] = useState("")
   const { login, signup } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    if (searchParams.get("verified") === "true") {
+      setVerifiedMessage("Email verified! You can now sign in.")
+    }
+  }, [searchParams])
 
   useEffect(() => {
     const token = localStorage.getItem("access_token")
@@ -231,7 +341,7 @@ export default function LoginPage() {
     setSubmitting(true)
     try {
       if (isSignup) {
-        await signup(name, email, password, orgName)
+        await signup(name, email, password, orgName, phone || undefined, countryCode)
       } else {
         await login(email, password)
       }
@@ -500,6 +610,39 @@ export default function LoginPage() {
                     </motion.div>
                   )}
 
+                  {isSignup && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.15 }}
+                    >
+                      <label className="block text-sm text-gray-400 mb-1.5">Phone (for account recovery)</label>
+                      <div className="relative group flex">
+                        <CountryCodeSelect value={countryCode} onChange={setCountryCode} />
+                        <div className="relative flex-1">
+                          <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-purple-400 transition-colors" />
+                          <input
+                            type="tel"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                            placeholder="555-0123"
+                            className="w-full bg-white/5 border border-l-0 border-white/10 rounded-r-xl pl-10 pr-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 transition-all text-sm"
+                          />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {verifiedMessage && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm"
+                    >
+                      {verifiedMessage}
+                    </motion.div>
+                  )}
+
                   {error && (
                     <motion.div
                       initial={{ opacity: 0, y: -8 }}
@@ -549,7 +692,12 @@ export default function LoginPage() {
 
                   {!isSignup && (
                     <div className="text-center pt-2">
-                      <button className="text-sm text-gray-500 hover:text-purple-400 transition-colors" data-cursor-hover>
+                      <button
+                        type="button"
+                        onClick={() => router.push("/forgot-password")}
+                        className="text-sm text-gray-500 hover:text-purple-400 transition-colors"
+                        data-cursor-hover
+                      >
                         Forgot password?
                       </button>
                     </div>

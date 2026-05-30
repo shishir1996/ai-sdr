@@ -45,6 +45,10 @@ class User(Base):
     avatar_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     google_id = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    country_code = Column(String(10), nullable=True)
+    email_verified = Column(Boolean, default=False)
+    supabase_uid = Column(String(255), nullable=True, unique=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
