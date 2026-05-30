@@ -65,24 +65,9 @@ async def signup(req: SignupRequest, db: AsyncSession = Depends(get_db)):
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    # Create user in Supabase Auth (sends verification email)
-    supabase_user = None
-    email_verified = True
-    try:
-        redirect_url = f"{settings.FRONTEND_URL}/login?verified=true"
-        supabase_result = await supabase_signup(req.email, req.password, redirect_to=redirect_url)
-        supabase_user = supabase_result.get("user") or supabase_result.get("id", {})
-        email_verified = False  # Supabase sends verification email by default
-    except Exception as e:
-        logger.warning(f"Supabase signup failed (proceeding with local auth): {e}")
-
     org = Organization(name=req.org_name, slug=req.org_name.lower().replace(" ", "-"))
     db.add(org)
     await db.flush()
-
-    supabase_uid = None
-    if supabase_user:
-        supabase_uid = supabase_user.get("id")
 
     user = User(
         org_id=org.id,
@@ -90,16 +75,36 @@ async def signup(req: SignupRequest, db: AsyncSession = Depends(get_db)):
         password_hash=hash_password(req.password),
         name=req.name,
         role="admin",
-        phone=req.phone,
-        country_code=req.country_code,
-        email_verified=email_verified,
-        supabase_uid=supabase_uid,
     )
+    # Store optional fields if the columns exist (post-migration)
+    for attr, val in [("phone", req.phone), ("country_code", req.country_code)]:
+        if val is not None:
+            try:
+                setattr(user, attr, val)
+            except Exception:
+                pass
     db.add(user)
     await db.flush()
 
+    # Create user in Supabase Auth (sends verification email)
+    try:
+        redirect_url = f"{settings.FRONTEND_URL}/login?verified=true"
+        supabase_result = await supabase_signup(req.email, req.password, redirect_to=redirect_url)
+        supabase_user = supabase_result.get("user") or supabase_result.get("id", {})
+        if supabase_user:
+            supabase_uid = supabase_user.get("id")
+            if supabase_uid:
+                try:
+                    setattr(user, "supabase_uid", supabase_uid)
+                    setattr(user, "email_verified", False)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"Supabase signup failed (proceeding with local auth): {e}")
+
     access_token = create_access_token({"sub": user.id, "org_id": org.id, "role": user.role})
     refresh_token = create_refresh_token({"sub": user.id})
+    email_verified = getattr(user, "email_verified", True)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, email_verified=email_verified)
 
 
@@ -115,7 +120,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        email_verified=user.email_verified,
+        email_verified=getattr(user, "email_verified", True),
     )
 
 
@@ -138,9 +143,9 @@ async def get_me(user: User = Depends(get_current_user)):
         "name": user.name,
         "role": user.role,
         "org_id": user.org_id,
-        "phone": user.phone,
-        "country_code": user.country_code,
-        "email_verified": user.email_verified,
+        "phone": getattr(user, "phone", None),
+        "country_code": getattr(user, "country_code", None),
+        "email_verified": getattr(user, "email_verified", True),
     }
 
 
@@ -193,16 +198,22 @@ async def update_profile(
     if req.name is not None:
         current_user.name = req.name
     if req.phone is not None:
-        current_user.phone = req.phone
+        try:
+            current_user.phone = req.phone
+        except Exception:
+            pass
     if req.country_code is not None:
-        current_user.country_code = req.country_code
+        try:
+            current_user.country_code = req.country_code
+        except Exception:
+            pass
     await db.flush()
     return {
         "id": current_user.id,
         "email": current_user.email,
         "name": current_user.name,
-        "phone": current_user.phone,
-        "country_code": current_user.country_code,
+        "phone": getattr(current_user, "phone", None),
+        "country_code": getattr(current_user, "country_code", None),
     }
 
 
