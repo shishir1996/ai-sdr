@@ -106,6 +106,12 @@ def get_settings() -> Settings:
     if env_file:
         kwargs["_env_file"] = env_file
     s = Settings(**kwargs)
+    # Debug: log raw env var value
+    _raw_db = os.environ.get("DATABASE_URL")
+    import logging as _log
+    _log.getLogger(__name__).info("=== [DEBUG] os.environ DATABASE_URL=%s ===", _raw_db)
+    _log.getLogger(__name__).info("=== [DEBUG] RAILWAY_SERVICE_ID=%s ===", os.environ.get("RAILWAY_SERVICE_ID"))
+    _log.getLogger(__name__).info("=== [DEBUG] pydantic DATABASE_URL=%s ===", s.DATABASE_URL)
     # Railway injects DATABASE_URL and other env vars at the OS level.
     # Explicitly apply them to override defaults in case pydantic-settings
     # doesn't pick them up (observed on Railway deploys).
