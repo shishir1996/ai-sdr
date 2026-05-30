@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.agent import SDRProfile, LeadState
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 from app.services.sdr.sdr_country_adapter import detect_country, get_country_profile
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ Target Locations: {profile.target_locations or 'Any'}
 Decide the next best action. Return only valid JSON."""
 
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=512, temperature=0.4, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=512, temperature=0.4, api_key=ai_key)
         decision = json.loads(raw)
         if "action" not in decision:
             return _fallback_decision(current_state, contact_count)

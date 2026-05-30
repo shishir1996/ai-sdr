@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from app.config import get_settings
 
@@ -105,3 +106,18 @@ def _openrouter_completion(
     if "error" in data:
         raise ValueError(f"OpenRouter error: {data['error'].get('message', str(data['error']))}")
     return data["choices"][0]["message"]["content"].strip()
+
+
+async def generate_text_async(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 512,
+    temperature: float = 0.7,
+    api_key: Optional[str] = None,
+) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        generate_text,
+        system_prompt, user_prompt, max_tokens, temperature, api_key,
+    )

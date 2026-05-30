@@ -11,7 +11,6 @@ from app.database import async_session_factory
 from app.models.agent import SDRProfile, LeadState, AgentLog
 from app.models.lead import Lead
 from app.models.campaign import Campaign, CampaignStep, EmailMessage
-from app.services.ai.model_client import generate_text
 from app.services.integrations.resolver import resolve_api_key, resolve_api_secret, resolve_refresh_token
 from app.services.sdr.auto_discovery import auto_discover_leads
 from app.services.lead_extraction.web_scraper import scrape_and_create_lead

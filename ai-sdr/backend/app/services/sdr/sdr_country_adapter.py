@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ Rules:
     user_prompt = f"Adapt this message for {lead_name} in {country_code.upper()}:\n\n{message_text}"
 
     try:
-        adapted = generate_text(system_prompt, user_prompt, max_tokens=512, temperature=0.5, api_key=ai_key)
+        adapted = await generate_text_async(system_prompt, user_prompt, max_tokens=512, temperature=0.5, api_key=ai_key)
         return adapted.strip()
     except Exception as e:
         logger.warning(f"Country adaptation failed: {e}")

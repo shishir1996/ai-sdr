@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { api } from "@/lib/api-client"
 import {
@@ -8,6 +8,33 @@ import {
   Users, Target, Play, Square, ChevronRight, Sparkles,
   AlertCircle, RefreshCw, Globe, Linkedin,
 } from "lucide-react"
+import SDRStatusBadge, { type SDRRunState } from "@/components/ui/SDRStatusBadge"
+import SDRNotificationPanel, { useSDRNotifications } from "@/components/ui/SDRNotification"
+
+/* ─── Format date with timezone ─── */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "Never"
+  const d = new Date(iso)
+  try {
+    return d.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    })
+  } catch {
+    return d.toLocaleString()
+  }
+}
+
+/* ─── Map SDR status to badge state ─── */
+function toBadgeState(s: string | undefined): SDRRunState {
+  if (!s || s === "idle" || s === "inactive") return "idle"
+  if (s === "paused") return "paused"
+  if (s === "error") return "error"
+  return "running"
+}
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   active: { label: "Active", color: "bg-green-500/10 text-green-500 border-green-500/30" },
@@ -21,6 +48,16 @@ export default function SDRListPage() {
   const [loading, setLoading] = useState(true)
   const [statusInfo, setStatusInfo] = useState<Record<string, any>>({})
   const [performance, setPerformance] = useState<Record<string, any>>({})
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const mounted = useRef(true)
+
+  const rawNotifications = useSDRNotifications(sdrs, statusInfo)
+  const notifications = rawNotifications.filter(n => !dismissed.has(n.id))
+
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
 
   useEffect(() => { load() }, [])
 
@@ -28,6 +65,7 @@ export default function SDRListPage() {
     setLoading(true)
     try {
       const list = await api.get<any[]>("/sdr/profiles")
+      if (!mounted.current) return
       setSdrs(list)
 
       const statusMap: Record<string, any> = {}
@@ -42,10 +80,12 @@ export default function SDRListPage() {
           perfMap[sdr.id] = p
         } catch {}
       }
-      setStatusInfo(statusMap)
-      setPerformance(perfMap)
+      if (mounted.current) {
+        setStatusInfo(statusMap)
+        setPerformance(perfMap)
+      }
     } catch (e) { console.error(e) }
-    finally { setLoading(false) }
+    finally { if (mounted.current) setLoading(false) }
   }
 
   const toggleActivation = async (sdr: any) => {
@@ -72,6 +112,11 @@ export default function SDRListPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <SDRNotificationPanel
+        notifications={notifications}
+        onDismiss={(id) => setDismissed(prev => new Set(prev).add(id))}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -91,6 +136,23 @@ export default function SDRListPage() {
           </Link>
         </div>
       </div>
+
+      {/* Notification summary banner */}
+      {notifications.length > 0 && (
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+          <AlertCircle size={16} className="text-amber-400 shrink-0" />
+          <p className="text-sm text-amber-300">
+            {notifications.length} issue{notifications.length > 1 ? "s" : ""} need{notifications.length === 1 ? "s" : ""} your attention
+            — check notifications below.
+          </p>
+          <button
+            onClick={() => setDismissed(new Set())}
+            className="ml-auto text-xs text-gray-500 hover:text-gray-300 underline underline-offset-2"
+          >
+            Dismiss all
+          </button>
+        </div>
+      )}
 
       {/* Empty State */}
       {sdrs.length === 0 && (
@@ -115,8 +177,9 @@ export default function SDRListPage() {
             const perf = performance[sdr.id] || {}
             const sdrStatus = sdr.is_active ? "active" : "draft"
             const cfg = STATUS_CONFIG[sdrStatus] || STATUS_CONFIG.draft
-            const isLive = status.current_status && status.current_status !== "idle" && status.current_status !== "inactive"
-            const totalLeads = (perf.leads_processed || 0)
+            const state = toBadgeState(status.current_status)
+            const isLive = state === "running"
+            const totalLeads = (perf.leads_processed || 0) + (status.leads_processed || 0)
             return (
               <Link
                 key={sdr.id}
@@ -127,24 +190,18 @@ export default function SDRListPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                      sdr.is_active ? "bg-green-500/15" : "bg-white/5"
+                      isLive ? "bg-emerald-500/15" : sdr.is_active ? "bg-blue-500/10" : "bg-white/5"
                     }`}>
-                      <Bot size={22} className={sdr.is_active ? "text-green-500" : "text-gray-500"} />
+                      <Bot size={22} className={
+                        isLive ? "text-emerald-500" : sdr.is_active ? "text-blue-500" : "text-gray-500"
+                      } />
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-semibold truncate group-hover:text-purple-400 transition-colors">
                         {sdr.name || "AI SDR"}
                       </h3>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${cfg.color}`}>
-                          {cfg.label}
-                        </span>
-                        {isLive && (
-                          <span className="flex items-center gap-1 text-[10px] text-green-500">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                            {status.current_status}
-                          </span>
-                        )}
+                      <div className="flex items-center gap-2 mt-1">
+                        <SDRStatusBadge state={state} label={status.current_status || cfg.label} />
                       </div>
                     </div>
                   </div>
@@ -174,8 +231,8 @@ export default function SDRListPage() {
                     </span>
                   )}
                   {!sdr.has_email && !sdr.has_linkedin && (
-                    <span className="text-[10px] px-2 py-1 rounded-full bg-gray-500/10 text-gray-500 border border-gray-500/20">
-                      No channels connected
+                    <span className="text-[10px] px-2 py-1 rounded-full bg-red-500/10 text-red-500 border border-red-500/20 flex items-center gap-1">
+                      <AlertCircle size={10} /> Not connected
                     </span>
                   )}
                 </div>
@@ -189,7 +246,7 @@ export default function SDRListPage() {
                   </div>
                   <div className="text-center p-2 rounded-lg bg-white/5">
                     <Mail size={14} className="mx-auto text-green-500" />
-                    <p className="text-xs font-bold mt-0.5">{perf.emails_drafted || 0}</p>
+                    <p className="text-xs font-bold mt-0.5">{perf.emails_drafted || status.emails_drafted || 0}</p>
                     <p className="text-[10px] text-muted-foreground">Emails</p>
                   </div>
                   <div className="text-center p-2 rounded-lg bg-white/5">
@@ -207,9 +264,7 @@ export default function SDRListPage() {
                   </span>
                   <span className="flex items-center gap-1 shrink-0">
                     <Clock size={10} />
-                    {status.last_active_at
-                      ? new Date(status.last_active_at).toLocaleDateString()
-                      : "Never"}
+                    {fmtDate(status.last_active_at)}
                   </span>
                 </div>
               </Link>

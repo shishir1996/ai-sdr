@@ -12,7 +12,7 @@ from app.models.lead import Lead
 from app.models.agent import SDRProfile
 from app.services.email.conversation import store_reply, build_conversation_context, analyze_reply
 from app.services.integrations.resolver import resolve_api_key, resolve_api_secret, resolve_refresh_token
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ Return JSON with keys: subject, body"""
     user_prompt = f"Conversation:\n{json.dumps(context, indent=2)}\n\nLatest reply: {reply.get('snippet', '')}\n\nWrite reply JSON."
 
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=512, temperature=0.7, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=512, temperature=0.7, api_key=ai_key)
         email_content = json.loads(raw)
     except Exception:
         email_content = {

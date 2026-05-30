@@ -1,7 +1,7 @@
 import json
 import re
 from typing import Optional
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 
 SYSTEM_PROMPT = """You are an expert B2B lead generation analyst. Given a customer persona description, you must extract structured fields that can be used to find matching leads via web scraping.
 
@@ -31,7 +31,7 @@ Example output:
 
 
 async def parse_persona(persona_text: str, api_key: Optional[str] = None) -> dict:
-    raw = generate_text(
+    raw = await generate_text_async(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=f"Parse this customer persona:\n\n{persona_text}",
         max_tokens=600,

@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 from app.services.lead_extraction.apollo import search_leads
 from app.services.integrations.resolver import resolve_api_key, resolve_api_secret, resolve_refresh_token
 from app.models.agent import SDRProfile
@@ -43,7 +43,7 @@ Company: {lead_data['company']}
 Return valid JSON with keys: subject, body"""
 
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=512, temperature=0.7, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=512, temperature=0.7, api_key=ai_key)
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -169,7 +169,7 @@ Tone: {profile.outreach_tone}"""
     user_prompt = f"Write a LinkedIn {'connection request' if action_type == 'connect' else 'DM'} for {lead_data['name']}, {lead_data['title']} at {lead_data['company']}"
 
     try:
-        message_text = generate_text(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
+        message_text = await generate_text_async(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
     except Exception as e:
         logger.warning(f"LinkedIn message generation failed: {e}")
         message_text = f"Hi {lead_data['name']}, I came across your profile and was impressed by your work at {lead_data['company']}. Would love to connect!"
@@ -257,7 +257,7 @@ Tone: {profile.outreach_tone}"""
     user_prompt = f"Write a LinkedIn comment engaging with {lead_data['name']}, {lead_data['title']} at {lead_data['company']}"
 
     try:
-        comment_text = generate_text(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
+        comment_text = await generate_text_async(system_prompt, user_prompt, max_tokens=200, temperature=0.7, api_key=ai_key)
     except Exception as e:
         logger.warning(f"LinkedIn comment generation failed: {e}")
         comment_text = f"Great insights, {lead_data['name']}! Thanks for sharing."
@@ -296,7 +296,7 @@ Keep it under 30 seconds. Include greeting, value prop, and call to action."""
     user_prompt = f"Call script for {lead_data['name']}, {lead_data['title']} at {lead_data['company']}"
 
     try:
-        script = generate_text(system_prompt, user_prompt, max_tokens=300, temperature=0.7, api_key=ai_key)
+        script = await generate_text_async(system_prompt, user_prompt, max_tokens=300, temperature=0.7, api_key=ai_key)
     except Exception as e:
         logger.warning(f"Call script generation failed: {e}")
         script = f"Hi {lead_data['name']}, this is {profile.name or 'AI SDR'} from {profile.product_name or 'our company'}. I noticed your work at {lead_data['company']} and wanted to discuss how we can help. Give me a call back when you're free."

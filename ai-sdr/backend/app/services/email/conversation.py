@@ -107,9 +107,9 @@ Rules:
 
     user_prompt = f"Conversation history:\n{json.dumps(conversation_context, indent=2)}\n\nAnalyze the latest lead reply and return valid JSON."
 
-    from app.services.ai.model_client import generate_text
+    from app.services.ai.model_client import generate_text_async
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=256, temperature=0.3, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=256, temperature=0.3, api_key=ai_key)
         return json.loads(raw)
     except Exception as e:
         logger.warning(f"Failed to analyze reply: {e}")

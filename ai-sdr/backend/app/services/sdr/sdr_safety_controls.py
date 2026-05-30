@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.models.agent import SDRProfile, AgentLog
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ A score is approved if spam_score < 30 and human_score > 60."""
     user_prompt = f"""Moderate this {channel} message:\n\n{message_text}\n\nReturn valid JSON."""
 
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=300, temperature=0.2, ai_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=300, temperature=0.2, api_key=ai_key)
         result = json.loads(raw)
         return result
     except Exception as e:

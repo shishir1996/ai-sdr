@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.models.agent import SDRProfile
 from app.models.campaign import Campaign, CampaignStep
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ Design for {industry} industry. Make it specific to this industry's sales dynami
 Design the complete campaign in JSON format."""
 
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=2048, temperature=0.7, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=2048, temperature=0.7, api_key=ai_key)
         plan = json.loads(raw)
         if "sequence" not in plan or not plan["sequence"]:
             plan["sequence"] = _default_sequence(industry)

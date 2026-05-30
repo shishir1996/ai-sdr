@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.agent import SDRProfile, AgentLog
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 from app.services.sdr.sdr_country_adapter import detect_country, adapt_outreach_for_country
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ Personalization Hooks:
 Return valid JSON with subject, body, cta, personalization_elements."""
 
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=800, temperature=0.7, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=800, temperature=0.7, api_key=ai_key)
         email = json.loads(raw)
         if not isinstance(email, dict) or "subject" not in email or "body" not in email:
             raise ValueError("Invalid email format")
@@ -171,6 +171,6 @@ Options: {', '.join(FOLLOWUP_TYPES)}
 Return ONLY the followup type as a string, no other text."""
     user_prompt = f"Contact count: {contact_count}\nRecent actions: {recent_actions}\nBest followup type:"
     try:
-        return generate_text(system_prompt, user_prompt, max_tokens=50, temperature=0.3, api_key=ai_key).strip()
+        return await generate_text_async(system_prompt, user_prompt, max_tokens=50, temperature=0.3, api_key=ai_key).strip()
     except Exception:
         return "soft_followup"

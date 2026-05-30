@@ -10,6 +10,7 @@ import {
   Sparkles, TrendingUp, Calendar, CheckCircle, XCircle, PauseCircle,
   Zap, MessageSquare, Globe, Linkedin, Trash2, Cpu,
 } from "lucide-react"
+import SDRStatusBadge, { type SDRRunState } from "@/components/ui/SDRStatusBadge"
 
 interface TabDef {
   key: string
@@ -45,6 +46,31 @@ const STATUS_CFG: Record<string, { label: string; color: string; icon: any }> = 
 }
 
 function SendIcon(props: any) { return <Zap {...props} /> }
+
+/* ─── Format date with timezone ─── */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "Never"
+  const d = new Date(iso)
+  try {
+    return d.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    })
+  } catch {
+    return d.toLocaleString()
+  }
+}
+
+/* ─── Map SDR status to badge state ─── */
+function toBadgeState(s: string | undefined): SDRRunState {
+  if (!s || s === "idle" || s === "inactive") return "idle"
+  if (s === "paused") return "paused"
+  if (s === "error") return "error"
+  return "running"
+}
 
 export default function SDRDetailPage() {
   const params = useParams()
@@ -142,9 +168,6 @@ export default function SDRDetailPage() {
     { label: "Meetings Booked", value: perf?.meetings_booked || 0, icon: Calendar, color: "text-emerald-500" },
   ]
 
-  const scfg = STATUS_CFG[status?.current_status || "idle"] || STATUS_CFG.idle
-  const StatusIcon = scfg.icon
-
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Back + header */}
@@ -159,13 +182,7 @@ export default function SDRDetailPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-semibold">{sdr.name || "AI SDR"}</h1>
-              <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${scfg.color}`}>
-                <StatusIcon size={12} className="inline mr-1" />
-                {scfg.label}
-              </span>
-              {status?.heartbeat_at && (Date.now() - new Date(status.heartbeat_at).getTime()) < 120000 && (
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              )}
+              <SDRStatusBadge state={toBadgeState(status?.current_status)} label={status?.current_status || "inactive"} />
             </div>
             <p className="text-xs text-muted-foreground">
               {sdr.target_titles ? `${sdr.target_titles.split(",")[0].trim()}` : "No ICP configured"}
@@ -189,18 +206,21 @@ export default function SDRDetailPage() {
 
       {/* Status bar */}
       {status && (
-        <div className="card p-4 border-l-4 border-l-purple-500">
+        <div className={`card p-4 border-l-4 ${
+          toBadgeState(status.current_status) === "error"
+            ? "border-l-red-500"
+            : toBadgeState(status.current_status) === "running"
+              ? "border-l-emerald-500"
+              : "border-l-blue-500"
+        }`}>
           <div className="flex items-center justify-between text-sm">
             <div className="flex items-center gap-4">
-              <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${scfg.color}`}>
-                <StatusIcon size={12} className="inline mr-1" />
-                {scfg.label}
-              </span>
+              <SDRStatusBadge state={toBadgeState(status.current_status)} label={status.current_status || "inactive"} pulsate={false} />
               {status.current_action && <span className="text-muted-foreground">Action: <span className="text-white/80">{status.current_action}</span></span>}
               {status.next_planned_action && <span className="text-muted-foreground hidden md:inline">Next: <span className="text-cyan-400">{status.next_planned_action}</span></span>}
             </div>
             <span className="text-xs text-muted-foreground">
-              {status.last_active_at ? `Last active: ${new Date(status.last_active_at).toLocaleString()}` : ""}
+              {fmtDate(status.last_active_at)}
             </span>
           </div>
         </div>
@@ -258,7 +278,7 @@ export default function SDRDetailPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs text-white/90 truncate">{act.summary || act.stage || "Action"}</p>
-                        <p className="text-[10px] text-muted-foreground">{new Date(act.created_at).toLocaleString()}</p>
+                        <p className="text-[10px] text-muted-foreground">{fmtDate(act.created_at)}</p>
                       </div>
                     </div>
                   ))}
@@ -388,7 +408,7 @@ export default function SDRDetailPage() {
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 capitalize">{ls.state?.replace(/_/g, " ")}</span>
                       </td>
                       <td className="py-2 px-2">{ls.contact_count}</td>
-                      <td className="py-2 px-2 text-muted-foreground">{ls.last_contacted_at ? new Date(ls.last_contacted_at).toLocaleDateString() : "—"}</td>
+                      <td className="py-2 px-2 text-muted-foreground">{fmtDate(ls.last_contacted_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -418,7 +438,7 @@ export default function SDRDetailPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium">{(act.stage || act.action || "Action").replace(/_/g, " ")}</span>
                       {act.channel && <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 capitalize">{act.channel}</span>}
-                      <span className="text-[10px] text-muted-foreground ml-auto">{new Date(act.created_at).toLocaleString()}</span>
+                      <span className="text-[10px] text-muted-foreground ml-auto">{fmtDate(act.created_at)}</span>
                     </div>
                     {act.summary && <p className="text-xs text-white/80 mt-1">{act.summary}</p>}
                     {act.reasoning && <p className="text-[10px] text-muted-foreground mt-0.5 italic">"{act.reasoning}"</p>}
@@ -449,7 +469,7 @@ export default function SDRDetailPage() {
                       {r.ai_confidence_score && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">{r.ai_confidence_score}%</span>
                       )}
-                      <span className="text-[10px] text-muted-foreground ml-auto">{new Date(r.created_at).toLocaleString()}</span>
+                      <span className="text-[10px] text-muted-foreground ml-auto">{fmtDate(r.created_at)}</span>
                     </div>
                     {r.human_readable_reasoning && <p className="text-sm text-white/80">"{r.human_readable_reasoning}"</p>}
                     <div className="flex flex-wrap gap-2 mt-2 text-[10px]">

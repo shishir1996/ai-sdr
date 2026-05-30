@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Optional
 
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 from app.models.lead import Lead
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ async def _analyze_company(company_name: str, industry: str, ai_key: Optional[st
 Return only valid JSON."""
     user_prompt = f"Analyze company: {company_name}, Industry: {industry}"
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=1024, temperature=0.3, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=1024, temperature=0.3, api_key=ai_key)
         return json.loads(raw)
     except Exception as e:
         logger.warning(f"Company analysis failed for {company_name}: {e}")
@@ -61,7 +61,7 @@ Return JSON with:
 Return only valid JSON."""
     user_prompt = f"Analyze: {name}, Title: {title}, LinkedIn: {linkedin_url}"
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=800, temperature=0.4, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=800, temperature=0.4, api_key=ai_key)
         return json.loads(raw)
     except Exception as e:
         logger.warning(f"LinkedIn analysis failed for {name}: {e}")
@@ -77,7 +77,7 @@ async def _get_industry_insights(industry: str, ai_key: Optional[str] = None) ->
 Return only valid JSON."""
     user_prompt = f"Industry: {industry}"
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=600, temperature=0.3, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=600, temperature=0.3, api_key=ai_key)
         return json.loads(raw)
     except Exception as e:
         logger.warning(f"Industry insights failed for {industry}: {e}")

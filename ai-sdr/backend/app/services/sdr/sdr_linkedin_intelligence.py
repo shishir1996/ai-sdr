@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import Optional
-from app.services.ai.model_client import generate_text
+from app.services.ai.model_client import generate_text, generate_text_async
 from app.services.sdr.sdr_country_adapter import detect_country, adapt_outreach_for_country
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ LinkedIn URL: {linkedin_url}
 Return valid JSON."""
 
     try:
-        raw = generate_text(system_prompt, user_prompt, max_tokens=800, temperature=0.5, api_key=ai_key)
+        raw = await generate_text_async(system_prompt, user_prompt, max_tokens=800, temperature=0.5, api_key=ai_key)
         return json.loads(raw)
     except Exception as e:
         logger.warning(f"LinkedIn analysis failed: {e}")
@@ -112,7 +112,7 @@ Rules:
         user_prompt = f"Write a LinkedIn followup email for {lead_name} at {company}"
 
     try:
-        return generate_text(system_prompt, user_prompt, max_tokens=200, temperature=0.6, ai_key=ai_key).strip()
+        return await generate_text_async(system_prompt, user_prompt, max_tokens=200, temperature=0.6, api_key=ai_key).strip()
     except Exception as e:
         logger.warning(f"LinkedIn DM generation failed: {e}")
         if invite_accepted:
