@@ -8,8 +8,6 @@ import {
   Building2, Sparkles, Mail, Lock, User, Globe, ArrowRight, Linkedin,
   Eye, EyeOff, Check, X, ChevronRight, Shield, Zap,
 } from "lucide-react"
-import CustomCursor from "@/components/ui/CustomCursor"
-
 /* ─── Performance helpers ─── */
 function isTouchDevice() {
   if (typeof window === "undefined") return false
@@ -247,8 +245,7 @@ export default function LoginPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[hsl(224,45%,4%)] cursor-none">
-        <CustomCursor color="168, 85, 247" />
+      <div className="min-h-screen flex items-center justify-center bg-[hsl(224,45%,4%)]">
         <div className="relative">
           <div className="w-14 h-14 border-2 border-purple-500/30 border-t-purple-500 rounded-full animate-spin" />
           <div
@@ -261,8 +258,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[hsl(224,45%,4%)] cursor-none overflow-hidden">
-      <CustomCursor color="168, 85, 247" />
+    <div className="min-h-screen flex bg-[hsl(224,45%,4%)] overflow-hidden">
 
       {/* ─── Left Panel (brand) ─── */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-gradient-to-br from-[hsl(224,45%,6%)] via-[hsl(224,40%,8%)] to-[hsl(224,45%,4%)]">

@@ -11,19 +11,10 @@ import {
   ChevronRight, ChevronLeft, Quote, Play, Clock, MessageSquare,
   Bot, Network, Workflow, Layers, Database, Signal, Cpu, Eye,
 } from "lucide-react"
-import CustomCursor from "@/components/ui/CustomCursor"
-
 /* ─── Performance: detect touch device ─── */
 function isTouchDevice() {
   if (typeof window === "undefined") return false
   return "ontouchstart" in window || navigator.maxTouchPoints > 0
-}
-
-/* ─── Custom cursor (enhanced) ─── */
-function EnhancedCursor() {
-  const touch = useRef(isTouchDevice()).current
-  if (touch) return null
-  return <CustomCursor color="168, 85, 247" hoverScale={1.8} />
 }
 
 /* ─── Smooth mouse position hook (throttled via rAF) ─── */
@@ -1084,8 +1075,7 @@ function Calendar(props: any) {
 /* ─── Main Page ─── */
 export default function LandingPage() {
   return (
-    <main className="min-h-screen bg-[hsl(224,45%,4%)] cursor-none overflow-x-hidden">
-      <EnhancedCursor />
+    <main className="min-h-screen bg-[hsl(224,45%,4%)] overflow-x-hidden">
       <Navbar />
       <HeroSection />
       <FeaturesSection />
