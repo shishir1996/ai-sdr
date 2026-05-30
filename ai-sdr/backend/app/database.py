@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -19,6 +20,15 @@ def get_engine():
 
 engine = get_engine()
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+# Log which DB is in use (password redacted)
+import logging
+_log = logging.getLogger(__name__)
+_db_url_log = settings.DATABASE_URL
+if "@" in _db_url_log:
+    _db_url_log = _db_url_log.split("@")[0].split("://")[0] + "://****:****@" + _db_url_log.split("@")[1]
+_log.info("=== DATABASE_URL in use: %s ===", _db_url_log)
+_log.info("=== RAILWAY_SERVICE_ID=%s ===", os.environ.get("RAILWAY_SERVICE_ID", "(not set)"))
 
 
 class Base(DeclarativeBase):
