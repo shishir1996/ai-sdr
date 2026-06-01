@@ -55,14 +55,20 @@ async def init_db():
             await conn.execute(text("PRAGMA foreign_keys=ON"))
             await conn.run_sync(Base.metadata.create_all)
     else:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            try:
-                await conn.execute(
-                    text("ALTER TABLE email_messages ADD COLUMN direction VARCHAR(20) DEFAULT 'outbound'")
-                )
-            except Exception:
-                pass  # column already exists
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                try:
+                    from sqlalchemy import text
+                    await conn.execute(
+                        text("ALTER TABLE email_messages ADD COLUMN direction VARCHAR(20) DEFAULT 'outbound'")
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            import traceback
+            _log.critical("=== FAILED to connect to PostgreSQL: %s ===", e)
+            _log.critical(traceback.format_exc())
 
 
 SUPABASE_URL: Optional[str] = None
