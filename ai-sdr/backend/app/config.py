@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=True)
 
     APP_NAME: str = "AI SDR"
-    APP_VERSION: str = "1.0.1"
+    APP_VERSION: str = "1.0.2"
     DEBUG: bool = False
     IS_PRODUCTION: bool = False
 

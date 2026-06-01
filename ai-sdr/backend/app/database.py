@@ -27,8 +27,8 @@ _log = logging.getLogger(__name__)
 _db_url_log = settings.DATABASE_URL
 if "@" in _db_url_log:
     _db_url_log = _db_url_log.split("@")[0].split("://")[0] + "://****:****@" + _db_url_log.split("@")[1]
-_log.info("=== DATABASE_URL in use: %s ===", _db_url_log)
-_log.info("=== RAILWAY_SERVICE_ID=%s ===", os.environ.get("RAILWAY_SERVICE_ID", "(not set)"))
+_log.warning("=== DATABASE_URL in use: %s ===", _db_url_log)
+_log.warning("=== RAILWAY_SERVICE_ID=%s ===", os.environ.get("RAILWAY_SERVICE_ID", "(not set)"))
 
 
 class Base(DeclarativeBase):
@@ -59,7 +59,7 @@ async def init_db() -> bool:
         try:
             async with engine.begin() as conn:
                 tables = sorted(Base.metadata.tables.keys())
-                _log.info("=== Tables registered in Base.metadata (%d): %s ===", len(tables), tables)
+                _log.warning("=== Tables registered in Base.metadata (%d): %s ===", len(tables), tables)
 
                 await conn.run_sync(Base.metadata.create_all)
 
@@ -68,7 +68,7 @@ async def init_db() -> bool:
                     text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
                 )
                 created = sorted(row[0] for row in result.fetchall())
-                _log.info("=== Tables found in PostgreSQL (%d): %s ===", len(created), created)
+                _log.warning("=== Tables found in PostgreSQL (%d): %s ===", len(created), created)
                 missing = set(Base.metadata.tables.keys()) - set(created)
                 # Also check feature_flags specifically — if missing, fallback to raw SQL
                 has_feature_flags = "feature_flags" in created
@@ -85,7 +85,7 @@ async def init_db() -> bool:
                                     await conn.execute(text(stmt + ";"))
                                 except Exception as se:
                                     _log.warning("SQL fallback statement skipped (likely already exists): %.100s", str(se))
-                        _log.info("=== railway_schema.sql fallback executed ===")
+                        _log.warning("=== railway_schema.sql fallback executed ===")
                         has_feature_flags = True
                     else:
                         _log.warning("=== railway_schema.sql not found at %s ===", schema_path)
