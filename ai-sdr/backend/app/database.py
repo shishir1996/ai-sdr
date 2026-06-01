@@ -58,9 +58,21 @@ async def init_db() -> bool:
     else:
         try:
             async with engine.begin() as conn:
+                # Log all tables that should be created
+                tables = sorted(Base.metadata.tables.keys())
+                _log.info("=== Tables registered in Base.metadata (%d): %s ===", len(tables), tables)
                 await conn.run_sync(Base.metadata.create_all)
+                # Verify that tables were actually created
+                from sqlalchemy import text
+                result = await conn.execute(
+                    text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+                )
+                created = sorted(row[0] for row in result.fetchall())
+                _log.info("=== Tables found in PostgreSQL (%d): %s ===", len(created), created)
+                missing = set(Base.metadata.tables.keys()) - set(created)
+                if missing:
+                    _log.warning("=== Tables MISSING after create_all: %s ===", sorted(missing))
                 try:
-                    from sqlalchemy import text
                     await conn.execute(
                         text("ALTER TABLE email_messages ADD COLUMN direction VARCHAR(20) DEFAULT 'outbound'")
                     )
