@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter
 from app.database import engine, settings
 
@@ -15,4 +16,6 @@ async def health_check():
         "database": url,
         "app_version": settings.APP_VERSION,
         "debug": settings.DEBUG,
+        "env_has_db_url": "DATABASE_URL" in os.environ,
+        "railway_service_id": os.environ.get("RAILWAY_SERVICE_ID", "NOT_SET"),
     }
