@@ -37,21 +37,21 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_supabase()
-    await init_db()
+    db_ok = await init_db()
     await init_redis()
-    async with async_session_factory() as db:
-        await seed_feature_flags(db)
-        await db.commit()
-
-        result = await db.execute(
-            select(SDRProfile).where(SDRProfile.is_active.is_(True))
-        )
-        active_profiles = result.scalars().all()
-    for profile in active_profiles:
-        import asyncio
-        from app.services.sdr.sdr_orchestrator import start_sdr_cycle
-        print(f"[startup] Restarting SDR cycle for {profile.name} (org={profile.org_id})", flush=True)
-        asyncio.create_task(start_sdr_cycle(profile.org_id, sdr_profile_id=profile.id))
+    if db_ok:
+        async with async_session_factory() as db:
+            await seed_feature_flags(db)
+            await db.commit()
+            result = await db.execute(
+                select(SDRProfile).where(SDRProfile.is_active.is_(True))
+            )
+            active_profiles = result.scalars().all()
+        for profile in active_profiles:
+            import asyncio
+            from app.services.sdr.sdr_orchestrator import start_sdr_cycle
+            print(f"[startup] Restarting SDR cycle for {profile.name} (org={profile.org_id})", flush=True)
+            asyncio.create_task(start_sdr_cycle(profile.org_id, sdr_profile_id=profile.id))
     yield
 
 

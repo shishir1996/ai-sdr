@@ -47,13 +47,14 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
-async def init_db():
+async def init_db() -> bool:
     if settings.DATABASE_URL.startswith("sqlite"):
         async with engine.begin() as conn:
             from sqlalchemy import text
             await conn.execute(text("PRAGMA journal_mode=WAL"))
             await conn.execute(text("PRAGMA foreign_keys=ON"))
             await conn.run_sync(Base.metadata.create_all)
+        return True
     else:
         try:
             async with engine.begin() as conn:
@@ -65,10 +66,12 @@ async def init_db():
                     )
                 except Exception:
                     pass
+            return True
         except Exception as e:
             import traceback
             _log.critical("=== FAILED to connect to PostgreSQL: %s ===", e)
             _log.critical(traceback.format_exc())
+            return False
 
 
 SUPABASE_URL: Optional[str] = None
