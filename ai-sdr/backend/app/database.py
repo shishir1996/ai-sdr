@@ -58,11 +58,11 @@ async def init_db() -> bool:
     else:
         try:
             async with engine.begin() as conn:
-                # Log all tables that should be created
                 tables = sorted(Base.metadata.tables.keys())
                 _log.info("=== Tables registered in Base.metadata (%d): %s ===", len(tables), tables)
+
                 await conn.run_sync(Base.metadata.create_all)
-                # Verify that tables were actually created
+
                 from sqlalchemy import text
                 result = await conn.execute(
                     text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
@@ -70,8 +70,29 @@ async def init_db() -> bool:
                 created = sorted(row[0] for row in result.fetchall())
                 _log.info("=== Tables found in PostgreSQL (%d): %s ===", len(created), created)
                 missing = set(Base.metadata.tables.keys()) - set(created)
-                if missing:
-                    _log.warning("=== Tables MISSING after create_all: %s ===", sorted(missing))
+                # Also check feature_flags specifically — if missing, fallback to raw SQL
+                has_feature_flags = "feature_flags" in created
+                if not has_feature_flags:
+                    _log.warning("=== feature_flags table missing — running railway_schema.sql fallback ===")
+                    import pathlib
+                    schema_path = pathlib.Path(__file__).resolve().parent.parent / "railway_schema.sql"
+                    if schema_path.exists():
+                        raw_sql = schema_path.read_text()
+                        for statement in raw_sql.split(";"):
+                            stmt = statement.strip()
+                            if stmt:
+                                try:
+                                    await conn.execute(text(stmt + ";"))
+                                except Exception as se:
+                                    _log.warning("SQL fallback statement skipped (likely already exists): %.100s", str(se))
+                        _log.info("=== railway_schema.sql fallback executed ===")
+                        has_feature_flags = True
+                    else:
+                        _log.warning("=== railway_schema.sql not found at %s ===", schema_path)
+
+                if missing and has_feature_flags:
+                    _log.warning("=== Tables MISSING after create_all (will be ignored): %s ===", sorted(missing))
+
                 try:
                     await conn.execute(
                         text("ALTER TABLE email_messages ADD COLUMN direction VARCHAR(20) DEFAULT 'outbound'")
