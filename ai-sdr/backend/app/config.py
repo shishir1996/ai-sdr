@@ -105,7 +105,6 @@ def get_settings() -> Settings:
     kwargs = {}
     if env_file:
         kwargs["_env_file"] = env_file
-    # Force settings from os.environ regardless of pydantic-settings behavior
     for _key in (
         "DATABASE_URL", "DATABASE_URL_SYNC",
         "SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY",
@@ -115,4 +114,14 @@ def get_settings() -> Settings:
         _val = os.environ.get(_key)
         if _val is not None:
             kwargs[_key] = _val
+    # If Railway auto-injects DATABASE_URL (postgresql://... sync URL),
+    # auto-convert to async for the async engine
+    db_url = kwargs.get("DATABASE_URL", "")
+    if db_url.startswith("postgresql://"):
+        kwargs["DATABASE_URL"] = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    # Derive DATABASE_URL_SYNC from DATABASE_URL if not provided
+    if "DATABASE_URL_SYNC" not in kwargs:
+        async_url = kwargs.get("DATABASE_URL", "")
+        if "postgresql+asyncpg://" in async_url:
+            kwargs["DATABASE_URL_SYNC"] = async_url.replace("postgresql+asyncpg://", "postgresql://", 1)
     return Settings(**kwargs)
