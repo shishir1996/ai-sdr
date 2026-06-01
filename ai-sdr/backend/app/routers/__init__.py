@@ -23,7 +23,6 @@ async def health_check():
 
 @router.get("/debug/env")
 async def debug_env():
-    import json
     keys = sorted(os.environ.keys())
     return {
         "env_keys": keys,
@@ -33,4 +32,7 @@ async def debug_env():
         "SUPABASE_URL_present": "SUPABASE_URL" in os.environ,
         "SECRET_KEY_present": "SECRET_KEY" in os.environ,
         "RAILWAY_SERVICE_ID": os.environ.get("RAILWAY_SERVICE_ID", "NOT_SET"),
+        "RAILWAY_DEPLOYMENT_ID": os.environ.get("RAILWAY_DEPLOYMENT_ID"),
+        "RAILWAY_GIT_COMMIT_SHA": os.environ.get("RAILWAY_GIT_COMMIT_SHA"),
+        "RAILWAY_GIT_BRANCH": os.environ.get("RAILWAY_GIT_BRANCH"),
     }
