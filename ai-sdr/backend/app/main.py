@@ -37,16 +37,15 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_supabase()
-    db_ok = await init_db()
+    db_ok = await init_db(on_ready=[seed_feature_flags])
     await init_redis()
     if db_ok:
         async with async_session_factory() as db:
-            await seed_feature_flags(db)
-            await db.commit()
             result = await db.execute(
                 select(SDRProfile).where(SDRProfile.is_active.is_(True))
             )
             active_profiles = result.scalars().all()
+            await db.commit()
         for profile in active_profiles:
             import asyncio
             from app.services.sdr.sdr_orchestrator import start_sdr_cycle
