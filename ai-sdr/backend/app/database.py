@@ -75,20 +75,40 @@ async def init_db() -> bool:
                 if not has_feature_flags:
                     _log.warning("=== feature_flags table missing — running railway_schema.sql fallback ===")
                     import pathlib
-                    schema_path = pathlib.Path(__file__).resolve().parent.parent / "railway_schema.sql"
-                    if schema_path.exists():
-                        raw_sql = schema_path.read_text()
+                    # Try multiple paths for railway_schema.sql
+                    schema_candidates = [
+                        pathlib.Path(__file__).resolve().parent.parent / "railway_schema.sql",
+                        pathlib.Path.cwd() / "railway_schema.sql",
+                        pathlib.Path("/app/railway_schema.sql"),
+                        pathlib.Path("/railway_schema.sql"),
+                    ]
+                    raw_sql = None
+                    for p in schema_candidates:
+                        if p.exists():
+                            raw_sql = p.read_text()
+                            _log.warning("=== Found railway_schema.sql at %s ===", p)
+                            break
+                    if raw_sql:
                         for statement in raw_sql.split(";"):
                             stmt = statement.strip()
-                            if stmt:
+                            if stmt and not stmt.startswith("--"):
                                 try:
                                     await conn.execute(text(stmt + ";"))
                                 except Exception as se:
-                                    _log.warning("SQL fallback statement skipped (likely already exists): %.100s", str(se))
-                        _log.warning("=== railway_schema.sql fallback executed ===")
-                        has_feature_flags = True
+                                    _log.warning("SQL fallback statement skipped: %.100s", str(se))
+                        # Re-verify table was actually created
+                        result2 = await conn.execute(
+                            text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+                        )
+                        created2 = sorted(row[0] for row in result2.fetchall())
+                        has_feature_flags = "feature_flags" in created2
+                        if has_feature_flags:
+                            _log.warning("=== railway_schema.sql fallback SUCCEEDED — feature_flags created ===")
+                            created = created2
+                        else:
+                            _log.warning("=== railway_schema.sql fallback FAILED — feature_flags still missing ===")
                     else:
-                        _log.warning("=== railway_schema.sql not found at %s ===", schema_path)
+                        _log.warning("=== railway_schema.sql not found (tried %d paths) ===", len(schema_candidates))
 
                 if missing and has_feature_flags:
                     _log.warning("=== Tables MISSING after create_all (will be ignored): %s ===", sorted(missing))

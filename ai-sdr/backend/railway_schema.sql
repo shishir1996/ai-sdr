@@ -3,14 +3,12 @@
 -- Safe to re-run (uses IF NOT EXISTS / ON CONFLICT DO NOTHING)
 
 -- Enable UUID generation
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================
 -- ORGANIZATIONS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS organizations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     slug VARCHAR(255) UNIQUE NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -21,7 +19,7 @@ CREATE TABLE IF NOT EXISTS organizations (
 -- USERS (includes migration 003 auth fields)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
@@ -45,7 +43,7 @@ CREATE INDEX IF NOT EXISTS ix_users_supabase_uid ON users(supabase_uid);
 -- LEADS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS leads (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     first_name VARCHAR(255),
     last_name VARCHAR(255),
@@ -84,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_leads_org_status ON leads(org_id, status);
 -- CAMPAIGNS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS campaigns (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     sdr_profile_id VARCHAR,
     name VARCHAR(255) NOT NULL,
@@ -102,7 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_campaigns_sdr_profile ON campaigns(sdr_profile_id
 -- CAMPAIGN STEPS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS campaign_steps (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     step_order INTEGER NOT NULL,
     channel VARCHAR(50) NOT NULL,
@@ -118,7 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_campaign_steps_campaign ON campaign_steps(campaig
 -- EMAIL TEMPLATES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS email_templates (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     subject VARCHAR(500) NOT NULL,
@@ -133,7 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_email_templates_org ON email_templates(org_id);
 -- EMAIL MESSAGES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS email_messages (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
     lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -161,7 +159,7 @@ CREATE INDEX IF NOT EXISTS idx_email_messages_sent ON email_messages(sent_at);
 -- CALL SCRIPTS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS call_scripts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
@@ -175,7 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_call_scripts_org ON call_scripts(org_id);
 -- CALL LOGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS call_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
     lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -195,7 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_call_logs_lead ON call_logs(lead_id);
 -- PIPELINES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS pipelines (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -207,7 +205,7 @@ CREATE INDEX IF NOT EXISTS idx_pipelines_org ON pipelines(org_id);
 -- DEAL STAGES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS deal_stages (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     pipeline_id UUID NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     stage_order INTEGER NOT NULL,
@@ -221,7 +219,7 @@ CREATE INDEX IF NOT EXISTS idx_deal_stages_pipeline ON deal_stages(pipeline_id);
 -- DEALS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS deals (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     lead_id UUID REFERENCES leads(id) ON DELETE SET NULL,
     campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
@@ -246,7 +244,7 @@ CREATE INDEX IF NOT EXISTS idx_deals_org_status ON deals(org_id, status);
 -- FEATURE FLAGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS feature_flags (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     key VARCHAR(100) UNIQUE NOT NULL,
     enabled BOOLEAN DEFAULT FALSE,
     description TEXT,
@@ -259,7 +257,7 @@ CREATE INDEX IF NOT EXISTS idx_feature_flags_key ON feature_flags(key);
 -- ORG FEATURE FLAGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS org_feature_flags (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     flag_key VARCHAR(100) NOT NULL,
     enabled BOOLEAN,
@@ -272,7 +270,7 @@ CREATE INDEX IF NOT EXISTS idx_org_flags_org ON org_feature_flags(org_id);
 -- INTEGRATIONS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS integrations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     provider VARCHAR(100) NOT NULL,
     label VARCHAR(255),
@@ -291,7 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_integrations_provider ON integrations(provider);
 -- SDR PROFILES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sdr_profiles (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL DEFAULT 'AI SDR',
     region VARCHAR(255),
@@ -340,7 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_sdr_profiles_org ON sdr_profiles(org_id);
 -- LEAD STATES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS lead_states (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
     sdr_profile_id VARCHAR,
@@ -363,7 +361,7 @@ CREATE INDEX IF NOT EXISTS idx_lead_states_sdr ON lead_states(sdr_profile_id);
 -- AGENT LOGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agent_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     lead_id UUID REFERENCES leads(id) ON DELETE SET NULL,
     sdr_profile_id VARCHAR,
@@ -383,7 +381,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_logs_created ON agent_logs(created_at);
 -- ORG SETTINGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS org_settings (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID UNIQUE NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     sell_type VARCHAR(50) DEFAULT 'product',
     product_name VARCHAR(255),
@@ -403,7 +401,7 @@ CREATE TABLE IF NOT EXISTS org_settings (
 -- SCRAPE PROFILES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS scrape_profiles (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id VARCHAR NOT NULL,
     name VARCHAR(255) NOT NULL,
     persona_description TEXT NOT NULL DEFAULT '',
@@ -420,7 +418,7 @@ CREATE INDEX IF NOT EXISTS idx_scrape_profiles_org ON scrape_profiles(org_id);
 -- SMTP CONFIGURATIONS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS smtp_configs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     provider VARCHAR(50) DEFAULT 'custom',
     host VARCHAR(255) NOT NULL,
@@ -447,7 +445,7 @@ CREATE INDEX IF NOT EXISTS idx_smtp_configs_org ON smtp_configs(org_id);
 -- AUDIT LOGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS audit_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     ip_address VARCHAR(45),
@@ -467,7 +465,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
 -- AI USAGE LOGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ai_usage_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     provider VARCHAR(50) NOT NULL,
     model VARCHAR(100) NOT NULL,
@@ -487,7 +485,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage_logs(created_at);
 -- NOTIFICATIONS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS notifications (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
@@ -641,7 +639,7 @@ CREATE INDEX IF NOT EXISTS idx_sdr_status_org ON sdr_status(org_id);
 -- CALL RECORDS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS call_records (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     lead_id UUID,
     campaign_id UUID,
@@ -661,7 +659,7 @@ CREATE INDEX IF NOT EXISTS idx_call_records_org ON call_records(org_id);
 -- CALL CAMPAIGNS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS call_campaigns (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -681,7 +679,7 @@ CREATE INDEX IF NOT EXISTS idx_call_campaigns_org ON call_campaigns(org_id);
 -- VOICE AGENTS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS voice_agents (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     provider VARCHAR(50) DEFAULT 'vapi',
@@ -697,7 +695,7 @@ CREATE INDEX IF NOT EXISTS idx_voice_agents_org ON voice_agents(org_id);
 -- CALL QUEUE
 -- ============================================================
 CREATE TABLE IF NOT EXISTS call_queue (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
     call_campaign_id UUID REFERENCES call_campaigns(id) ON DELETE SET NULL,
@@ -718,7 +716,7 @@ CREATE INDEX IF NOT EXISTS idx_call_queue_status ON call_queue(status);
 -- CALL ANALYTICS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS call_analytics (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     total_calls INTEGER DEFAULT 0,
@@ -737,7 +735,7 @@ CREATE INDEX IF NOT EXISTS idx_call_analytics_date ON call_analytics(date);
 -- AI SUMMARIES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ai_summaries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     call_record_id UUID,
     summary_text TEXT NOT NULL,
