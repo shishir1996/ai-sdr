@@ -9,7 +9,7 @@ from app.models.vp_sales import VPSalesProfile, ResearchAgent, VPActionLog
 from app.models.user import User
 from app.utils.auth import get_current_user
 from app.services.vp.decision_engine import (
-    decide_next_action, get_vp_dashboard, get_vp_decisions, log_vp_action, assess_lead_situation
+    decide_and_execute, get_vp_dashboard, get_vp_decisions, log_vp_action, assess_lead_situation
 )
 from app.services.research.agent_service import create_research_agent, execute_research, get_agent_results
 
@@ -169,12 +169,8 @@ async def vp_decide(
     if not vp:
         raise HTTPException(status_code=404, detail="Create VP profile first")
 
-    decision = await decide_next_action(db, user.org_id, vp)
-    await log_vp_action(db, user.org_id, vp.id,
-                        decision.get("action", "decide"),
-                        decision.get("reasoning", "No reasoning provided"),
-                        decision)
-    return decision
+    result = await decide_and_execute(db, user.org_id, vp)
+    return result
 
 
 @router.get("/agents")

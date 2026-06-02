@@ -55,12 +55,21 @@ export default function VPDashboardPage() {
     }
   }
 
+  const [executing, setExecuting] = useState(false)
+  const [lastResult, setLastResult] = useState<any>(null)
+
   const runDecision = async () => {
+    setExecuting(true)
+    setLastResult(null)
     try {
       const dec = await api.post<any>("/vp/decide")
-      setDecisions((prev: any[]) => [dec, ...prev])
+      setLastResult(dec)
+      setDecisions((prev: any[]) => [{ action_type: dec.action, reasoning: dec.reasoning, details: { summary: dec.summary, actions: dec.actions_executed }, created_at: new Date().toISOString() }, ...prev])
+      load()
     } catch (e) {
       console.error(e)
+    } finally {
+      setExecuting(false)
     }
   }
 
@@ -162,8 +171,9 @@ export default function VPDashboardPage() {
           <h1 className="text-2xl font-bold text-white">VP Sales Dashboard</h1>
           <p className="text-sm text-gray-400 mt-1">{vp.name} &middot; {vp.target_country || "No country set"}</p>
         </div>
-        <button onClick={runDecision} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors">
-          Run Decision Engine
+        <button onClick={runDecision} disabled={executing} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+          {executing ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" /> : null}
+          {executing ? "Executing..." : "Run Decision Engine"}
         </button>
       </div>
 
@@ -216,12 +226,22 @@ export default function VPDashboardPage() {
         ) : (
           <div className="space-y-3">
             {decisions.slice(0, 10).map((d: any) => (
-              <div key={d.id} className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+              <div key={d.id || d.created_at} className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded text-xs font-medium">{d.action_type}</span>
                   <span className="text-xs text-gray-500">{d.created_at ? new Date(d.created_at).toLocaleString() : ""}</span>
                 </div>
                 <p className="text-sm text-gray-300">{d.reasoning}</p>
+                {d.details?.summary && (
+                  <p className="text-xs text-emerald-400 mt-1">{d.details.summary}</p>
+                )}
+                {d.details?.actions && d.details.actions.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {d.details.actions.map((a: string, i: number) => (
+                      <span key={i} className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded text-[10px]">{a}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

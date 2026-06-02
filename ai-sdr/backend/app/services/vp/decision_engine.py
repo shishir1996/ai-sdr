@@ -1,12 +1,14 @@
 import logging
+import json
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models.vp_sales import VPSalesProfile, ResearchAgent, ResearchResult, VPActionLog
-from app.models.agent import SDRProfile, LeadState
+from app.models.agent import SDRProfile
 from app.models.lead import Lead
 from app.services.ai.provider import generate_text
-from app.services.lead_sources.service import get_enabled_sources, is_source_enabled
+from app.services.lead_sources.service import get_enabled_sources
+from app.services.research.agent_service import create_research_agent, execute_research, convert_to_lead
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,9 @@ async def assess_lead_situation(db: AsyncSession, org_id: str, vp: VPSalesProfil
             ResearchResult.converted_to_lead == False,
         )
     )
+    agent_count = await db.scalar(
+        select(func.count(ResearchAgent.id)).where(ResearchAgent.org_id == org_id)
+    )
     sdr_count = await db.scalar(
         select(func.count(SDRProfile.id)).where(
             SDRProfile.org_id == org_id,
@@ -59,6 +64,7 @@ async def assess_lead_situation(db: AsyncSession, org_id: str, vp: VPSalesProfil
     return {
         "total_leads": lead_count or 0,
         "unconverted_research": research_count or 0,
+        "total_agents": agent_count or 0,
         "total_sdrs": sdr_count or 0,
         "active_sdrs": active_sdrs or 0,
         "enabled_sources": enabled,
@@ -66,64 +72,6 @@ async def assess_lead_situation(db: AsyncSession, org_id: str, vp: VPSalesProfil
         "has_target_country": bool(vp.target_country),
         "has_icp": bool(vp.icp_description),
     }
-
-
-async def decide_next_action(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
-    situation = await assess_lead_situation(db, org_id, vp)
-    prompt = (
-        f"You are a VP of Sales for a company. Assess the current situation and decide the next action.\n\n"
-        f"Current situation:\n"
-        f"- Total leads in CRM: {situation['total_leads']}\n"
-        f"- Unconverted research findings: {situation['unconverted_research']}\n"
-        f"- Total SDRs: {situation['total_sdrs']}\n"
-        f"- Active SDRs: {situation['active_sdrs']}\n"
-        f"- Enabled lead sources: {situation['enabled_sources']}\n"
-        f"- Has product info: {situation['has_product_info']}\n"
-        f"- Has target country: {situation['has_target_country']}\n"
-        f"- Has ICP defined: {situation['has_icp']}\n\n"
-        f"Possible actions:\n"
-        f"1. create_research_agent - if leads are low and no research agents exist\n"
-        f"2. convert_research_to_leads - if unconverted research exists\n"
-        f"3. create_sdr - if enough leads exist and SDRs are needed\n"
-        f"4. assign_campaign - if SDRs have no campaigns\n"
-        f"5. monitor - if everything is running\n\n"
-        f"Return a JSON object with:\n"
-        f"- action: the selected action\n"
-        f"- reasoning: detailed explanation of why this action\n"
-        f"- suggested_queries: if action is create_research_agent, suggest 3 search queries\n"
-        f"- sdr_recommendation: if action is create_sdr, suggest name and focus\n"
-        f"Only return valid JSON."
-    )
-    import json
-    models_to_try = ["deepseek-v4-flash-free", "openrouter-auto", "deepseek-v3"]
-    last_error = None
-    for model_id in models_to_try:
-        try:
-            result = await generate_text("", prompt, model_id=model_id)
-            decision = json.loads(result.strip())
-            return decision
-        except Exception as e:
-            logger.warning("VP decision AI failed with %s: %s", model_id, e)
-            last_error = e
-
-    logger.info("AI unavailable, using rule-based decision")
-    s = situation
-    if s["unconverted_research"] > 0:
-        action = "convert_research_to_leads"
-        reasoning = f"{s['unconverted_research']} research findings ready to convert to leads."
-    elif s["total_leads"] == 0 and s["active_sdrs"] == 0:
-        action = "create_research_agent"
-        reasoning = "No leads in pipeline. Start research to find prospects."
-    elif s["total_leads"] > 5 and s["active_sdrs"] == 0:
-        action = "create_sdr"
-        reasoning = f"{s['total_leads']} leads available but no active SDRs to work them."
-    elif s["total_sdrs"] > s["active_sdrs"]:
-        action = "monitor"
-        reasoning = f"{s['active_sdrs']}/{s['total_sdrs']} SDRs active. Consider activating idle SDRs."
-    else:
-        action = "monitor"
-        reasoning = "All systems running. Monitoring for new opportunities."
-    return {"action": action, "reasoning": reasoning}
 
 
 async def log_vp_action(
@@ -143,6 +91,157 @@ async def log_vp_action(
     )
     db.add(log)
     await db.flush()
+
+
+async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
+    situation = await assess_lead_situation(db, org_id, vp)
+
+    actions_taken = []
+
+    try:
+        decision = await _ai_decision(situation, vp)
+    except Exception as e:
+        logger.info("AI decision unavailable (%s), using rule-based", e)
+        decision = _rule_based_decision(situation)
+
+    action = decision.get("action", "monitor")
+    reasoning = decision.get("reasoning", "")
+
+    if action == "create_research_agent":
+        queries = decision.get("suggested_queries", [])
+        if not queries and vp.product_name:
+            queries = [
+                f"companies looking for {vp.product_name}",
+                f"{vp.target_country or ''} {vp.product_name} buyers".strip(),
+                f"{vp.product_name} decision makers".strip(),
+            ]
+        if queries:
+            agent = await create_research_agent(
+                db=db, org_id=org_id, vp_id=vp.id,
+                name=f"Auto-Agent - {vp.product_name or 'Prospecting'}",
+                search_queries="\n".join(queries),
+                target_industry=vp.icp_description or "",
+                target_country=vp.target_country or "",
+                target_audience="",
+                max_leads=50,
+            )
+            await log_vp_action(db, org_id, vp.id, "agent_created",
+                                f"Created research agent '{agent.name}' with {len(queries)} queries", {})
+            leads_found = await execute_research(db, agent.id)
+            await log_vp_action(db, org_id, vp.id, "research_completed",
+                                f"Agent '{agent.name}' found {leads_found} leads", {"leads_found": leads_found})
+            actions_taken.append(f"Created agent '{agent.name}' and found {leads_found} leads")
+
+    elif action == "convert_research_to_leads":
+        converted = 0
+        result = await db.execute(
+            select(ResearchResult).where(
+                ResearchResult.org_id == org_id,
+                ResearchResult.converted_to_lead == False,
+            )
+        )
+        for row in result.scalars().all():
+            lead_id = await convert_to_lead(db, org_id, row.id)
+            if lead_id:
+                converted += 1
+        if converted:
+            await log_vp_action(db, org_id, vp.id, "leads_converted",
+                                f"Converted {converted} research results to leads", {"count": converted})
+            actions_taken.append(f"Converted {converted} research results to leads")
+
+    elif action == "create_sdr":
+        sdr_name = decision.get("sdr_recommendation", {}).get("name") or f"SDR - {vp.product_name or 'Outreach'}"
+        try:
+            sdr = SDRProfile(
+                org_id=org_id,
+                name=sdr_name,
+                sell_type="product",
+                product_name=vp.product_name or "",
+                product_description=vp.product_description or "",
+                service_description=vp.service_description or "",
+                target_country=vp.target_country or "",
+                target_titles=decision.get("sdr_recommendation", {}).get("focus", ""),
+                target_industries=vp.icp_description or "",
+                is_active=True,
+            )
+            db.add(sdr)
+            await db.flush()
+            await log_vp_action(db, org_id, vp.id, "sdr_created",
+                                f"Created SDR '{sdr_name}'", {"sdr_id": sdr.id})
+            actions_taken.append(f"Created SDR '{sdr_name}'")
+        except Exception as e:
+            logger.warning("Failed to create SDR: %s", e)
+            actions_taken.append(f"Failed to create SDR: {e}")
+
+    elif action == "assign_campaign":
+        await log_vp_action(db, org_id, vp.id, "campaign_check",
+                            "Campaign assignment logic triggered", {})
+        actions_taken.append("Campaign readiness checked")
+
+    else:
+        await log_vp_action(db, org_id, vp.id, "monitor",
+                            "All systems running. Monitoring.", {})
+        actions_taken.append("Monitoring - no action needed")
+
+    new_situation = await assess_lead_situation(db, org_id, vp)
+
+    return {
+        "action": action,
+        "reasoning": reasoning,
+        "summary": "; ".join(actions_taken) if actions_taken else "No actions taken",
+        "actions_executed": actions_taken,
+        "situation_before": situation,
+        "situation_after": new_situation,
+    }
+
+
+async def _ai_decision(situation: dict, vp: VPSalesProfile) -> dict:
+    prompt = (
+        f"You are a VP of Sales for a company. Assess the current situation and decide the next action.\n\n"
+        f"Current situation:\n"
+        f"- Total leads in CRM: {situation['total_leads']}\n"
+        f"- Unconverted research findings: {situation['unconverted_research']}\n"
+        f"- Research agents: {situation['total_agents']}\n"
+        f"- Total SDRs: {situation['total_sdrs']}\n"
+        f"- Active SDRs: {situation['active_sdrs']}\n"
+        f"- Enabled lead sources: {situation['enabled_sources']}\n"
+        f"- Has product info: {situation['has_product_info']}\n"
+        f"- Has target country: {situation['has_target_country']}\n"
+        f"- Has ICP defined: {situation['has_icp']}\n\n"
+        f"Possible actions:\n"
+        f"1. create_research_agent - if leads are low and no research agents exist\n"
+        f"2. convert_research_to_leads - if unconverted research exists\n"
+        f"3. create_sdr - if enough leads exist and SDRs are needed\n"
+        f"4. assign_campaign - if SDRs have no campaigns\n"
+        f"5. monitor - if everything is running\n\n"
+        f"Return ONLY valid JSON with:\n"
+        f"- action: the selected action\n"
+        f"- reasoning: explanation\n"
+        f"- suggested_queries: [3 search query strings] if create_research_agent\n"
+        f"- sdr_recommendation: {{name, focus}} if create_sdr\n"
+    )
+    models_to_try = ["deepseek-v4-flash-free", "openrouter-auto", "deepseek-v3"]
+    last_error = None
+    for model_id in models_to_try:
+        try:
+            result = await generate_text("", prompt, model_id=model_id)
+            return json.loads(result.strip())
+        except Exception as e:
+            last_error = e
+    raise last_error or Exception("All AI models failed")
+
+
+def _rule_based_decision(situation: dict) -> dict:
+    s = situation
+    if s["unconverted_research"] > 0:
+        return {"action": "convert_research_to_leads", "reasoning": f"{s['unconverted_research']} research findings ready to convert to leads."}
+    if s["total_leads"] == 0:
+        return {"action": "create_research_agent", "reasoning": "No leads in pipeline. Start research to find prospects.", "suggested_queries": []}
+    if s["total_leads"] > 5 and s["active_sdrs"] == 0:
+        return {"action": "create_sdr", "reasoning": f"{s['total_leads']} leads available but no active SDRs.", "sdr_recommendation": {"name": "SDR - Auto", "focus": "Lead follow-up"}}
+    if s["total_sdrs"] > s["active_sdrs"]:
+        return {"action": "monitor", "reasoning": f"{s['active_sdrs']}/{s['total_sdrs']} SDRs active."}
+    return {"action": "monitor", "reasoning": "All systems running. Monitoring."}
 
 
 async def get_vp_dashboard(db: AsyncSession, org_id: str, vp_id: str) -> dict:
@@ -165,20 +264,11 @@ async def get_vp_dashboard(db: AsyncSession, org_id: str, vp_id: str) -> dict:
     all_sdrs = list(sdr_result.scalars().all())
     active_sdrs = [s for s in all_sdrs if s.is_active]
 
-    campaign_result = await db.execute(
-        select(func.count()).select_from(__import__("app.models.campaign", fromlist=["Campaign"]).Campaign)
-        .where(
-            __import__("app.models.campaign", fromlist=["Campaign"]).Campaign.org_id == org_id,
-            __import__("app.models.campaign", fromlist=["Campaign"]).Campaign.status == "active",
-        )
-    )
-    active_campaigns = campaign_result.scalar() or 0
-
     meetings_result = await db.execute(
-        select(func.count()).select_from(LeadState)
+        select(func.count()).select_from(Lead)
         .where(
-            LeadState.org_id == org_id,
-            LeadState.state == "meeting_scheduled",
+            Lead.org_id == org_id,
+            Lead.state == "meeting_scheduled",
         )
     )
     meetings_generated = meetings_result.scalar() or 0
@@ -197,7 +287,6 @@ async def get_vp_dashboard(db: AsyncSession, org_id: str, vp_id: str) -> dict:
         ) or 0,
         "sdrs_created": len(all_sdrs),
         "active_sdrs": len(active_sdrs),
-        "campaigns_running": active_campaigns,
         "meetings_generated": meetings_generated,
         "sources_used": await get_enabled_sources(db, org_id),
         "recent_decisions": decisions,

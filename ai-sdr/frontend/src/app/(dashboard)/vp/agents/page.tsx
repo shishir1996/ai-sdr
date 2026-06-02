@@ -58,7 +58,7 @@ export default function VPResearchAgentsPage() {
           </div>
           <p className="text-gray-400">No research agents created yet.</p>
           <p className="text-gray-500 text-sm mt-1">
-            The VP will create agents automatically, or configure lead sources and run the decision engine.
+            The VP Sales AI autonomously creates and manages research agents. Go to the VP Dashboard and click <strong>"Run Decision Engine"</strong> to start.
           </p>
         </div>
       ) : (
