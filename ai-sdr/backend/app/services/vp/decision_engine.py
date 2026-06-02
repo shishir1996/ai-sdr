@@ -94,14 +94,36 @@ async def decide_next_action(db: AsyncSession, org_id: str, vp: VPSalesProfile) 
         f"- sdr_recommendation: if action is create_sdr, suggest name and focus\n"
         f"Only return valid JSON."
     )
-    try:
-        result = await generate_text("", prompt)
-        import json
-        decision = json.loads(result.strip())
-        return decision
-    except Exception as e:
-        logger.warning("VP decision AI failed: %s", e)
-        return {"action": "monitor", "reasoning": "AI decision engine unavailable"}
+    import json
+    models_to_try = ["deepseek-v4-flash-free", "openrouter-auto", "deepseek-v3"]
+    last_error = None
+    for model_id in models_to_try:
+        try:
+            result = await generate_text("", prompt, model_id=model_id)
+            decision = json.loads(result.strip())
+            return decision
+        except Exception as e:
+            logger.warning("VP decision AI failed with %s: %s", model_id, e)
+            last_error = e
+
+    logger.info("AI unavailable, using rule-based decision")
+    s = situation
+    if s["unconverted_research"] > 0:
+        action = "convert_research_to_leads"
+        reasoning = f"{s['unconverted_research']} research findings ready to convert to leads."
+    elif s["total_leads"] == 0 and s["active_sdrs"] == 0:
+        action = "create_research_agent"
+        reasoning = "No leads in pipeline. Start research to find prospects."
+    elif s["total_leads"] > 5 and s["active_sdrs"] == 0:
+        action = "create_sdr"
+        reasoning = f"{s['total_leads']} leads available but no active SDRs to work them."
+    elif s["total_sdrs"] > s["active_sdrs"]:
+        action = "monitor"
+        reasoning = f"{s['active_sdrs']}/{s['total_sdrs']} SDRs active. Consider activating idle SDRs."
+    else:
+        action = "monitor"
+        reasoning = "All systems running. Monitoring for new opportunities."
+    return {"action": action, "reasoning": reasoning}
 
 
 async def log_vp_action(
