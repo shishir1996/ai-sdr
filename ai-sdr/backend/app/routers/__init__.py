@@ -36,3 +36,45 @@ async def debug_env():
         "RAILWAY_GIT_COMMIT_SHA": os.environ.get("RAILWAY_GIT_COMMIT_SHA"),
         "RAILWAY_GIT_BRANCH": os.environ.get("RAILWAY_GIT_BRANCH"),
     }
+
+
+@router.get("/debug/db-test")
+async def debug_db_test():
+    from app.database import async_session_factory
+    from app.models.user import User
+    from sqlalchemy import select, text
+    import traceback
+
+    results = {}
+    errors = {}
+
+    try:
+        async with async_session_factory() as db:
+            try:
+                result = await db.execute(text("SELECT 1"))
+                results["select_1"] = result.scalar()
+            except Exception as e:
+                errors["select_1"] = traceback.format_exc()
+
+            try:
+                result = await db.execute(text("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"))
+                results["table_count"] = result.scalar()
+            except Exception as e:
+                errors["table_count"] = traceback.format_exc()
+
+            try:
+                result = await db.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"))
+                tables = [row[0] for row in result.fetchall()]
+                results["tables"] = tables
+            except Exception as e:
+                errors["tables"] = traceback.format_exc()
+
+            try:
+                result = await db.execute(select(User).where(User.email == "test@test.com"))
+                results["user_query"] = "ok (no user found)"
+            except Exception as e:
+                errors["user_query"] = traceback.format_exc()
+    except Exception as e:
+        errors["session"] = traceback.format_exc()
+
+    return {"results": results, "errors": errors}
