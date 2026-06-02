@@ -143,11 +143,59 @@ async def init_db() -> bool:
                         except Exception:
                             pass
 
-                for col in [
-                    "ADD COLUMN outreach_active BOOLEAN DEFAULT FALSE",
-                    "ADD COLUMN target_titles TEXT",
-                    "ADD COLUMN target_business_types TEXT",
-                ]:
+            for tname, cols in [
+                ("missions", [
+                    "ADD COLUMN org_id VARCHAR",
+                    "ADD COLUMN vp_id VARCHAR",
+                    "ADD COLUMN name VARCHAR(255)",
+                    "ADD COLUMN objective TEXT",
+                    "ADD COLUMN kpi_target TEXT",
+                    "ADD COLUMN status VARCHAR(50) DEFAULT 'draft'",
+                    "ADD COLUMN vp_reasoning TEXT",
+                ]),
+                ("mission_tasks", [
+                    "ADD COLUMN mission_id VARCHAR",
+                    "ADD COLUMN org_id VARCHAR",
+                    "ADD COLUMN agent_type VARCHAR(50)",
+                    "ADD COLUMN agent_id VARCHAR",
+                    "ADD COLUMN objective TEXT",
+                    "ADD COLUMN execution_plan JSON",
+                    "ADD COLUMN status VARCHAR(50) DEFAULT 'pending'",
+                    "ADD COLUMN report JSON",
+                    "ADD COLUMN confidence_score FLOAT",
+                    "ADD COLUMN vp_feedback VARCHAR(50)",
+                    "ADD COLUMN vp_notes TEXT",
+                ]),
+                ("agent_memories", [
+                    "ADD COLUMN org_id VARCHAR",
+                    "ADD COLUMN agent_type VARCHAR(50)",
+                    "ADD COLUMN memory_type VARCHAR(50)",
+                    "ADD COLUMN content JSON",
+                ]),
+                ("agent_performance", [
+                    "ADD COLUMN org_id VARCHAR",
+                    "ADD COLUMN agent_type VARCHAR(50)",
+                    "ADD COLUMN metric_name VARCHAR(100)",
+                    "ADD COLUMN metric_value FLOAT DEFAULT 0",
+                    "ADD COLUMN period VARCHAR(50) DEFAULT 'all_time'",
+                ]),
+            ]:
+                for col in cols:
+                    try:
+                        await conn.execute(text("SAVEPOINT mig_vp"))
+                        await conn.execute(text(f"ALTER TABLE {tname} {col}"))
+                        await conn.execute(text("RELEASE SAVEPOINT mig_vp"))
+                    except Exception:
+                        try:
+                            await conn.execute(text("ROLLBACK TO SAVEPOINT mig_vp"))
+                        except Exception:
+                            pass
+
+            for col in [
+                "ADD COLUMN outreach_active BOOLEAN DEFAULT FALSE",
+                "ADD COLUMN target_titles TEXT",
+                "ADD COLUMN target_business_types TEXT",
+            ]:
                     try:
                         await conn.execute(text("SAVEPOINT mig_sp2"))
                         await conn.execute(text(f"ALTER TABLE vp_sales_profiles {col}"))

@@ -11,6 +11,7 @@ from app.models.scrape_profile import ScrapeProfile
 from app.models.audit import AuditLog, AiUsageLog, Notification
 from app.models.smtp import SMTPConfig
 from app.models.vp_sales import VPSalesProfile, LeadSourceControl, ResearchAgent, ResearchResult, VPActionLog
+from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
 from app.database import Base
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "AuditLog", "AiUsageLog", "Notification",
     "SMTPConfig",
     "VPSalesProfile", "LeadSourceControl", "ResearchAgent", "ResearchResult", "VPActionLog",
+    "Mission", "MissionTask", "AgentMemory", "AgentPerformance",
 ]

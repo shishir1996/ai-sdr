@@ -6,12 +6,17 @@ from pydantic import BaseModel
 from typing import Optional
 from app.database import get_db
 from app.models.vp_sales import VPSalesProfile, ResearchAgent, VPActionLog
+from app.models.vp_orchestration import Mission, MissionTask, AgentPerformance
 from app.models.user import User
 from app.utils.auth import get_current_user
 from app.services.vp.decision_engine import (
-    decide_and_execute, get_vp_dashboard, get_vp_decisions, log_vp_action, assess_lead_situation
+    decide_and_execute, get_vp_dashboard, get_vp_decisions, log_vp_action, assess_lead_situation,
 )
 from app.services.research.agent_service import create_research_agent, execute_research, get_agent_results
+from app.services.mission.mission_service import (
+    create_mission, decompose_mission, evaluate_mission_reports,
+    get_vp_missions, get_mission_detail, assign_task_to_agent,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/vp", tags=["vp"])
@@ -39,6 +44,18 @@ class ResearchAgentCreateRequest(BaseModel):
     target_country: Optional[str] = None
     target_audience: Optional[str] = None
     max_leads: int = 50
+
+
+class MissionCreateRequest(BaseModel):
+    name: str
+    objective: str
+    kpi_target: Optional[str] = None
+
+
+class MissionTaskFeedbackRequest(BaseModel):
+    task_id: str
+    vp_feedback: Optional[str] = None
+    vp_notes: Optional[str] = None
 
 
 @router.get("/profile")
@@ -374,3 +391,128 @@ async def remove_sdr(
     sdr.deleted_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
     await db.flush()
     return {"message": f"SDR '{sdr.name}' removed"}
+
+
+@router.get("/missions")
+async def list_missions(
+    status: Optional[str] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    missions = await get_vp_missions(db, user.org_id, status)
+    return {"missions": missions}
+
+
+@router.post("/missions")
+async def create_mission_endpoint(
+    req: MissionCreateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(VPSalesProfile).where(VPSalesProfile.org_id == user.org_id)
+    )
+    vp = result.scalar_one_or_none()
+    if not vp:
+        raise HTTPException(status_code=404, detail="Create VP profile first")
+
+    mission = await create_mission(
+        db, user.org_id, vp.id,
+        name=req.name,
+        objective=req.objective,
+        kpi_target=req.kpi_target,
+    )
+
+    tasks = await decompose_mission(db, user.org_id, vp.id, mission,
+                                    vp_reasoning="Manually created mission")
+
+    return {
+        "id": mission.id,
+        "name": mission.name,
+        "tasks_created": len(tasks),
+        "message": f"Mission '{mission.name}' created with {len(tasks)} tasks",
+    }
+
+
+@router.get("/missions/{mission_id}")
+async def get_mission(
+    mission_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    detail = await get_mission_detail(db, mission_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return detail
+
+
+@router.post("/missions/{mission_id}/evaluate")
+async def evaluate_mission(
+    mission_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(VPSalesProfile).where(VPSalesProfile.org_id == user.org_id)
+    )
+    vp = result.scalar_one_or_none()
+    if not vp:
+        raise HTTPException(status_code=404, detail="Create VP profile first")
+
+    mission = await db.get(Mission, mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    evaluation = await evaluate_mission_reports(db, user.org_id, vp.id, mission)
+    return evaluation
+
+
+@router.post("/missions/feedback")
+async def provide_task_feedback(
+    req: MissionTaskFeedbackRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await db.get(MissionTask, req.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if req.vp_feedback:
+        task.vp_feedback = req.vp_feedback
+    if req.vp_notes:
+        task.vp_notes = req.vp_notes
+    await db.flush()
+    return {"message": "Feedback recorded"}
+
+
+@router.get("/command-center")
+async def vp_command_center(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(VPSalesProfile).where(VPSalesProfile.org_id == user.org_id)
+    )
+    vp = result.scalar_one_or_none()
+    if not vp:
+        return {"error": "no_vp", "message": "Create a VP Sales profile first"}
+
+    dashboard = await get_vp_dashboard(db, user.org_id, vp.id)
+    missions = await get_vp_missions(db, user.org_id)
+    decisions = await get_vp_decisions(db, user.org_id, vp.id)
+    situation = await assess_lead_situation(db, user.org_id, vp)
+
+    return {
+        "vp": {
+            "id": vp.id,
+            "name": vp.name,
+            "product_name": vp.product_name,
+            "target_country": vp.target_country,
+            "target_business_types": vp.target_business_types,
+            "icp_description": vp.icp_description,
+            "outreach_active": bool(vp.outreach_active),
+        },
+        "dashboard": dashboard,
+        "missions": missions,
+        "recent_decisions": decisions[:10],
+        "situation": situation,
+    }
