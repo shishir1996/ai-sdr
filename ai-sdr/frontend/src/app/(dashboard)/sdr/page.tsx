@@ -4,14 +4,14 @@ import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { api } from "@/lib/api-client"
 import {
-  Bot, Plus, Mail, MessageCircle, Phone, Activity, Clock,
-  Users, Target, Play, Square, ChevronRight, Sparkles,
-  AlertCircle, RefreshCw, Globe, Linkedin,
+  Bot, Plus, Mail, Activity, Clock,
+  Users, Target, Play, Square,
+  AlertCircle, RefreshCw, Linkedin,
+  Phone, Calendar, ChevronRight,
 } from "lucide-react"
 import SDRStatusBadge, { type SDRRunState } from "@/components/ui/SDRStatusBadge"
 import SDRNotificationPanel, { useSDRNotifications } from "@/components/ui/SDRNotification"
 
-/* ─── Format date with timezone ─── */
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "Never"
   const d = new Date(iso)
@@ -28,7 +28,6 @@ function fmtDate(iso: string | null | undefined): string {
   }
 }
 
-/* ─── Map SDR status to badge state ─── */
 function toBadgeState(s: string | undefined): SDRRunState {
   if (!s || s === "idle" || s === "inactive") return "idle"
   if (s === "paused") return "paused"
@@ -36,11 +35,10 @@ function toBadgeState(s: string | undefined): SDRRunState {
   return "running"
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  active: { label: "Active", color: "bg-green-500/10 text-green-500 border-green-500/30" },
-  idle: { label: "Idle", color: "bg-gray-500/10 text-gray-400 border-gray-500/30" },
-  paused: { label: "Paused", color: "bg-amber-500/10 text-amber-500 border-amber-500/30" },
-  draft: { label: "Draft", color: "bg-blue-500/10 text-blue-500 border-blue-500/30" },
+function getActiveChannel(sdr: any): { label: string; icon: any; color: string } | null {
+  if (sdr.has_email) return { label: "Email", icon: Mail, color: "text-green-500" }
+  if (sdr.has_linkedin) return { label: "LinkedIn", icon: Linkedin, color: "text-cyan-500" }
+  return null
 }
 
 export default function SDRListPage() {
@@ -48,6 +46,7 @@ export default function SDRListPage() {
   const [loading, setLoading] = useState(true)
   const [statusInfo, setStatusInfo] = useState<Record<string, any>>({})
   const [performance, setPerformance] = useState<Record<string, any>>({})
+  const [campaigns, setCampaigns] = useState<Record<string, any[]>>({})
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const mounted = useRef(true)
 
@@ -70,6 +69,7 @@ export default function SDRListPage() {
 
       const statusMap: Record<string, any> = {}
       const perfMap: Record<string, any> = {}
+      const campMap: Record<string, any[]> = {}
       for (const sdr of list) {
         try {
           const s = await api.get<any>(`/sdr/status?sdr_profile_id=${sdr.id}`)
@@ -79,10 +79,15 @@ export default function SDRListPage() {
           const p = await api.get<any>(`/sdr/activity/performance?sdr_profile_id=${sdr.id}`)
           perfMap[sdr.id] = p
         } catch {}
+        try {
+          const c = await api.get<any[]>(`/campaigns?sdr_profile_id=${sdr.id}`)
+          campMap[sdr.id] = c
+        } catch {}
       }
       if (mounted.current) {
         setStatusInfo(statusMap)
         setPerformance(perfMap)
+        setCampaigns(campMap)
       }
     } catch (e) { console.error(e) }
     finally { if (mounted.current) setLoading(false) }
@@ -117,7 +122,6 @@ export default function SDRListPage() {
         onDismiss={(id) => setDismissed(prev => new Set(prev).add(id))}
       />
 
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Bot size={28} className="text-purple-500" />
@@ -137,13 +141,11 @@ export default function SDRListPage() {
         </div>
       </div>
 
-      {/* Notification summary banner */}
       {notifications.length > 0 && (
         <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
           <AlertCircle size={16} className="text-amber-400 shrink-0" />
           <p className="text-sm text-amber-300">
             {notifications.length} issue{notifications.length > 1 ? "s" : ""} need{notifications.length === 1 ? "s" : ""} your attention
-            — check notifications below.
           </p>
           <button
             onClick={() => setDismissed(new Set())}
@@ -154,7 +156,6 @@ export default function SDRListPage() {
         </div>
       )}
 
-      {/* Empty State */}
       {sdrs.length === 0 && (
         <div className="card p-12 text-center">
           <Bot size={60} className="mx-auto mb-4 text-purple-500/40" />
@@ -169,24 +170,26 @@ export default function SDRListPage() {
         </div>
       )}
 
-      {/* SDR Cards Grid */}
       {sdrs.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {sdrs.map((sdr) => {
             const status = statusInfo[sdr.id] || {}
             const perf = performance[sdr.id] || {}
+            const sdrCamps = campaigns[sdr.id] || []
             const sdrStatus = sdr.is_active ? "active" : "draft"
-            const cfg = STATUS_CONFIG[sdrStatus] || STATUS_CONFIG.draft
             const state = toBadgeState(status.current_status)
             const isLive = state === "running"
             const totalLeads = (perf.leads_processed || 0) + (status.leads_processed || 0)
+            const meetings = perf.meetings_booked || 0
+            const channel = getActiveChannel(sdr)
+            const campaignName = sdrCamps.length > 0 ? sdrCamps[0].name || sdrCamps[0].campaign_name : null
+
             return (
               <Link
                 key={sdr.id}
                 href={`/sdr/${sdr.id}`}
-                className="card p-5 group hover:border-purple-500/40 transition-all hover:shadow-lg hover:shadow-purple-500/5"
+                className="card p-4 group hover:border-purple-500/40 transition-all hover:shadow-lg hover:shadow-purple-500/5"
               >
-                {/* Top row: name + status */}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
@@ -201,7 +204,12 @@ export default function SDRListPage() {
                         {sdr.name || "AI SDR"}
                       </h3>
                       <div className="flex items-center gap-2 mt-1">
-                        <SDRStatusBadge state={state} label={status.current_status || cfg.label} />
+                        <SDRStatusBadge state={state} label={status.current_status || (sdr.is_active ? "Active" : "Draft")} />
+                        {campaignName && (
+                          <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">
+                            {campaignName}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -214,53 +222,50 @@ export default function SDRListPage() {
                     }`}
                     title={sdr.is_active ? "Deactivate" : "Activate"}
                   >
-                    {sdr.is_active ? <Square size={16} /> : <Play size={16} />}
+                    {sdr.is_active ? <Square size={15} /> : <Play size={15} />}
                   </button>
                 </div>
 
-                {/* Connected Channels */}
                 <div className="flex items-center gap-2 mb-3">
-                  {sdr.has_email && (
-                    <span className="text-[10px] px-2 py-1 rounded-full bg-green-500/10 text-green-500 border border-green-500/20 flex items-center gap-1">
-                      <Mail size={10} /> Email
+                  {channel && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${channel.color} bg-white/5 border border-white/10 flex items-center gap-1`}>
+                      <channel.icon size={10} /> {channel.label}
                     </span>
                   )}
-                  {sdr.has_linkedin && (
-                    <span className="text-[10px] px-2 py-1 rounded-full bg-cyan-500/10 text-cyan-500 border border-cyan-500/20 flex items-center gap-1">
-                      <Linkedin size={10} /> LinkedIn
+                  {!channel && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full text-red-500 bg-red-500/10 border border-red-500/20 flex items-center gap-1">
+                      <AlertCircle size={10} /> No channel
                     </span>
                   )}
-                  {!sdr.has_email && !sdr.has_linkedin && (
-                    <span className="text-[10px] px-2 py-1 rounded-full bg-red-500/10 text-red-500 border border-red-500/20 flex items-center gap-1">
-                      <AlertCircle size={10} /> Not connected
+                  {meetings > 0 && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-1">
+                      <Calendar size={10} /> {meetings} meeting{meetings !== 1 ? "s" : ""}
                     </span>
                   )}
                 </div>
 
-                {/* Metrics row */}
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   <div className="text-center p-2 rounded-lg bg-white/5">
-                    <Users size={14} className="mx-auto text-blue-500" />
+                    <Users size={13} className="mx-auto text-blue-500" />
                     <p className="text-xs font-bold mt-0.5">{totalLeads}</p>
-                    <p className="text-[10px] text-muted-foreground">Leads</p>
+                    <p className="text-[9px] text-muted-foreground">Leads</p>
                   </div>
                   <div className="text-center p-2 rounded-lg bg-white/5">
-                    <Mail size={14} className="mx-auto text-green-500" />
+                    <Mail size={13} className="mx-auto text-green-500" />
                     <p className="text-xs font-bold mt-0.5">{perf.emails_drafted || status.emails_drafted || 0}</p>
-                    <p className="text-[10px] text-muted-foreground">Emails</p>
+                    <p className="text-[9px] text-muted-foreground">Emails</p>
                   </div>
                   <div className="text-center p-2 rounded-lg bg-white/5">
-                    <Target size={14} className="mx-auto text-purple-500" />
+                    <Target size={13} className="mx-auto text-purple-500" />
                     <p className="text-xs font-bold mt-0.5">{perf.campaigns_created || 0}</p>
-                    <p className="text-[10px] text-muted-foreground">Campaigns</p>
+                    <p className="text-[9px] text-muted-foreground">Campaigns</p>
                   </div>
                 </div>
 
-                {/* Current status + last active */}
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-2 border-t border-white/5">
                   <span className="flex items-center gap-1 truncate">
                     <Activity size={10} />
-                    {status.current_action || "No current action"}
+                    {status.current_action || "Idle"}
                   </span>
                   <span className="flex items-center gap-1 shrink-0">
                     <Clock size={10} />

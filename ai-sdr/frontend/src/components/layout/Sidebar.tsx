@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Users, Mail, PhoneCall, Target, BarChart3, Settings,
   ChevronLeft, ChevronRight, Building2, Plug, ToggleLeft, Brain, Activity,
-  ScrollText, Sparkles, Phone, PhoneForwarded,
+  ScrollText, Sparkles, Phone, PhoneForwarded, Crown, Search,
+  SlidersHorizontal,
 } from "lucide-react"
 import { useState } from "react"
 
@@ -16,6 +17,10 @@ const navItems = [
   { href: "/emails", label: "Email", icon: Mail },
   { href: "/calls", label: "Call Logs", icon: Phone },
   { href: "/deals", label: "Deals", icon: BarChart3 },
+  { type: "divider" as const },
+  { href: "/vp/dashboard", label: "VP Sales", icon: Crown },
+  { href: "/vp/agents", label: "Research Agents", icon: Search },
+  { href: "/vp/lead-sources", label: "Lead Sources", icon: SlidersHorizontal },
   { type: "divider" as const },
   { href: "/sdr", label: "AI SDR", icon: Brain },
   { href: "/agent", label: "Agent Activity", icon: Activity },

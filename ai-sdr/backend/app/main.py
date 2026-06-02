@@ -25,6 +25,9 @@ from app.routers.calls import router as calls_router
 from app.routers.vapi_webhook import router as vapi_webhook_router
 from app.routers.payments import router as payments_router
 from app.routers.calendar import router as calendar_router
+from app.routers.vp import router as vp_router
+from app.routers.lead_sources import router as lead_sources_router
+from app.routers.crm import router as crm_router
 from app.services.feature_flag.service import seed_feature_flags
 from app.services.security.middleware import SecurityHeadersMiddleware
 from app.services.redis_service import init_redis
@@ -116,3 +119,6 @@ app.include_router(calls_router, prefix="/api/v1")
 app.include_router(vapi_webhook_router, prefix="/api/v1")
 app.include_router(payments_router, prefix="/api/v1")
 app.include_router(calendar_router, prefix="/api/v1")
+app.include_router(vp_router, prefix="/api/v1")
+app.include_router(lead_sources_router, prefix="/api/v1")
+app.include_router(crm_router, prefix="/api/v1")

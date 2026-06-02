@@ -10,6 +10,7 @@ from app.models.settings import OrgSettings
 from app.models.scrape_profile import ScrapeProfile
 from app.models.audit import AuditLog, AiUsageLog, Notification
 from app.models.smtp import SMTPConfig
+from app.models.vp_sales import VPSalesProfile, LeadSourceControl, ResearchAgent, ResearchResult, VPActionLog
 from app.database import Base
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "ScrapeProfile",
     "AuditLog", "AiUsageLog", "Notification",
     "SMTPConfig",
+    "VPSalesProfile", "LeadSourceControl", "ResearchAgent", "ResearchResult", "VPActionLog",
 ]
