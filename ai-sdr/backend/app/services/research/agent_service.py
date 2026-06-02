@@ -78,7 +78,12 @@ async def execute_research(db: AsyncSession, agent_id: str) -> int:
                     contact_phone=r.get("contact_phone", ""),
                     website=r.get("website", ""),
                     industry=r.get("industry", agent.target_industry or ""),
+                    business_type=r.get("business_type", ""),
                     location=r.get("location", agent.target_country or ""),
+                    city=r.get("city", ""),
+                    state=r.get("state", ""),
+                    country=r.get("country", ""),
+                    postal_code=r.get("postal_code", ""),
                     raw_data=r,
                     status="new",
                 )
@@ -121,16 +126,26 @@ async def convert_to_lead(
     if not result or result.converted_to_lead:
         return None
 
+    first_name, last_name = "", ""
+    if result.contact_name:
+        name_parts = result.contact_name.strip().split(None, 1)
+        first_name = name_parts[0] if name_parts else ""
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
     lead = Lead(
         org_id=org_id,
-        first_name=(result.contact_name or "").split(" ")[0] if result.contact_name else None,
-        last_name=" ".join((result.contact_name or "").split(" ")[1:]) if result.contact_name and " " in result.contact_name else None,
+        first_name=first_name or None,
+        last_name=last_name or None,
         company=result.company_name,
         email=result.contact_email,
         phone=result.contact_phone,
         title=result.contact_title,
-        industry=result.industry,
+        industry=result.industry or result.business_type,
         location=result.location,
+        city=result.city,
+        state=result.state,
+        country=result.country,
+        postal_code=result.postal_code,
         website=result.website,
         source=f"research_{result.source}",
         status="new",

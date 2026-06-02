@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+PHONE_REGEX = re.compile(
+    r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{4,10}'
+)
+EMAIL_REGEX = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
+POSTAL_CODE_REGEX = re.compile(
+    r'\b\d{5}(?:[-\s]\d{4})?\b|\b[A-Z]\d[A-Z]\s?\d[A-Z]\d\b'
+)
+
 
 async def _scrape_html(url: str) -> Optional[str]:
     try:
@@ -31,14 +39,119 @@ async def _extract_text(html: str) -> str:
     return soup.get_text(separator=" ", strip=True)
 
 
+def _extract_emails(text: str) -> list[str]:
+    return list(set(EMAIL_REGEX.findall(text)))
+
+
+def _extract_phones(text: str) -> list[str]:
+    return list(set(PHONE_REGEX.findall(text)))
+
+
+def _extract_postal_codes(text: str) -> list[str]:
+    return list(set(POSTAL_CODE_REGEX.findall(text)))
+
+
+def _parse_address(text: str) -> dict:
+    parts = [p.strip() for p in re.split(r'[,;\n]+', text) if p.strip()]
+    result = {"city": "", "state": "", "country": "", "postal_code": ""}
+
+    for p in parts:
+        pc = POSTAL_CODE_REGEX.search(p)
+        if pc and not result["postal_code"]:
+            result["postal_code"] = pc.group()
+
+    known_countries = [
+        "usa", "united states", "canada", "uk", "united kingdom",
+        "australia", "germany", "france", "india", "china", "japan",
+        "brazil", "mexico", "singapore", "uae", "dubai",
+    ]
+    known_states = [
+        "ca", "ny", "tx", "fl", "il", "pa", "oh", "ga", "nc", "mi",
+        "ontario", "quebec", "british columbia", "alberta",
+        "california", "texas", "florida", "new york",
+    ]
+
+    for p in parts:
+        pl = p.lower()
+        if pl in known_countries and not result["country"]:
+            result["country"] = p.title()
+        elif pl in known_states and not result["state"]:
+            result["state"] = p.title()
+        elif result["postal_code"] in p and not result["city"]:
+            before = parts[parts.index(p) - 1] if parts.index(p) > 0 else ""
+            if before and len(before) > 2:
+                result["city"] = before
+
+    if not result["city"] and parts:
+        for p in parts:
+            pl = p.lower()
+            if not any(k in pl for k in known_countries + known_states) and len(p) > 2 and not re.search(r'\d', p):
+                result["city"] = p
+                break
+
+    return result
+
+
+def _split_name(full_name: str) -> tuple[str, str]:
+    if not full_name:
+        return ("", "")
+    parts = full_name.strip().split(None, 1)
+    first = parts[0] if parts else ""
+    last = parts[1] if len(parts) > 1 else ""
+    return (first, last)
+
+
+def _guess_company_title(text: str) -> str:
+    patterns = [
+        r'(?:VP|Director|Head|Chief|Manager|Lead|President|Founder|CEO|CTO|COO|CFO|Owner|Principal|Partner)\s+of\s+[\w\s]+',
+        r'(?:VP|Director|Head|Chief|Manager|Lead|President|Founder|CEO|CTO|COO|CFO|Owner|Principal|Partner)\b[\w\s,]*',
+    ]
+    for p in patterns:
+        m = re.search(p, text, re.I)
+        if m:
+            return m.group().strip()
+    return ""
+
+
+def _enrich_page(url: str, existing: dict) -> dict:
+    html = _scrape_html(url)
+    if not html:
+        return existing
+    text = _extract_text(html)
+
+    if not existing.get("contact_email"):
+        emails = _extract_emails(text)
+        if emails:
+            existing["contact_email"] = emails[0]
+
+    if not existing.get("contact_phone"):
+        phones = _extract_phones(text)
+        if phones:
+            existing["contact_phone"] = phones[0]
+
+    if not existing.get("contact_title"):
+        title = _guess_company_title(text)
+        if title:
+            existing["contact_title"] = title
+
+    if not existing.get("city") or not existing.get("state") or not existing.get("country"):
+        address_info = _parse_address(text[:2000])
+        for k in ("city", "state", "country", "postal_code"):
+            if not existing.get(k) and address_info.get(k):
+                existing[k] = address_info[k]
+
+    return existing
+
+
 async def _ai_generate_results(query: str, source_label: str, num_results: int) -> list[dict]:
     from app.services.ai.provider import generate_text
     prompt = (
-        f"Act as a web research assistant specializing in {source_label}. "
-        f"Based on your training data, find realistic companies and contacts matching: '{query}'. "
-        f"Return {num_results} results as a JSON array of objects with these fields: "
-        f"title, link, snippet, company_name, contact_name, contact_title, industry, location, contact_email. "
-        f"Only return valid JSON, no other text."
+        f"Act as a business data researcher. Find {num_results} real companies matching: '{query}'. "
+        f"Return ONLY valid JSON array. Each object must have: "
+        f"title, link, snippet, company_name, contact_name, contact_title, "
+        f"contact_email, contact_phone, industry, business_type, location, "
+        f"city, state, country, postal_code, website. "
+        f"Use realistic data for actual companies. No explanation, only JSON."
     )
     try:
         result = await generate_text("", prompt)
@@ -50,6 +163,21 @@ async def _ai_generate_results(query: str, source_label: str, num_results: int) 
     return []
 
 
+def _result(title="", link="", snippet="", company_name="",
+            contact_name="", contact_title="", contact_email="",
+            contact_phone="", website="", industry="", business_type="",
+            location="", city="", state="", country="", postal_code="") -> dict:
+    return {
+        "title": title, "link": link, "snippet": snippet,
+        "company_name": company_name, "contact_name": contact_name,
+        "contact_title": contact_title, "contact_email": contact_email,
+        "contact_phone": contact_phone, "website": website,
+        "industry": industry, "business_type": business_type,
+        "location": location, "city": city, "state": state,
+        "country": country, "postal_code": postal_code,
+    }
+
+
 async def _duckduckgo_search(query: str, num_results: int = 10) -> list[dict]:
     results = []
     try:
@@ -57,7 +185,7 @@ async def _duckduckgo_search(query: str, num_results: int = 10) -> list[dict]:
         html = await _scrape_html(url)
         if html:
             soup = BeautifulSoup(html, "html.parser")
-            for i, result in enumerate(soup.select(".result")):
+            for result in soup.select(".result"):
                 if len(results) >= num_results:
                     break
                 title_el = result.select_one(".result__title a")
@@ -66,36 +194,17 @@ async def _duckduckgo_search(query: str, num_results: int = 10) -> list[dict]:
                     href = title_el.get("href", "")
                     match = re.search(r"uddg=(https?://[^&]+)", href)
                     link = match.group(1) if match else href
-                    results.append({
-                        "title": title_el.get_text(strip=True),
-                        "link": link,
-                        "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
-                        "company_name": "",
-                        "contact_name": "",
-                        "contact_title": "",
-                        "industry": "",
-                        "location": "",
-                    })
+                    snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                    company = title_el.get_text(strip=True)
+                    result_item = _result(
+                        title=company, link=link, snippet=snippet,
+                        company_name=company,
+                    )
+                    result_item = _enrich_page(link, result_item)
+                    results.append(result_item)
     except Exception as e:
         logger.warning("DuckDuckGo search failed: %s", e)
     return results
-
-
-async def _scrape_company_website(company_name: str) -> dict:
-    info = {"website": "", "contacts": [], "description": ""}
-    try:
-        url = f"https://www.google.com/search?q={quote_plus(company_name + ' company about team')}"
-        html = await _scrape_html(url)
-        if html:
-            soup = BeautifulSoup(html, "html.parser")
-            for a in soup.select("a[href^='http']"):
-                href = a.get("href", "")
-                if re.search(r"(linkedin\.com/company|crunchbase|zoominfo)", href, re.I):
-                    info["website"] = href
-                    break
-    except Exception as e:
-        logger.debug("Company scrape failed for %s: %s", company_name, e)
-    return info
 
 
 async def search_google(query: str, num_results: int = 10) -> list[dict]:
@@ -112,22 +221,21 @@ async def search_bing(query: str, num_results: int = 10) -> list[dict]:
         html = await _scrape_html(url)
         if html:
             soup = BeautifulSoup(html, "html.parser")
-            for i, li in enumerate(soup.select("#b_results > li.b_algo")):
+            for li in soup.select("#b_results > li.b_algo"):
                 if len(results) >= num_results:
                     break
                 title_el = li.select_one("h2 a")
                 snippet_el = li.select_one(".b_caption p")
                 if title_el:
-                    results.append({
-                        "title": title_el.get_text(strip=True),
-                        "link": title_el.get("href", ""),
-                        "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
-                        "company_name": "",
-                        "contact_name": "",
-                        "contact_title": "",
-                        "industry": "",
-                        "location": "",
-                    })
+                    link = title_el.get("href", "")
+                    snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                    company = title_el.get_text(strip=True)
+                    result_item = _result(
+                        title=company, link=link, snippet=snippet,
+                        company_name=company,
+                    )
+                    result_item = _enrich_page(link, result_item)
+                    results.append(result_item)
     except Exception as e:
         logger.warning("Bing search failed: %s", e)
     if not results:
@@ -140,9 +248,8 @@ async def search_web_general(query: str, num_results: int = 10) -> list[dict]:
     if not results:
         results = await _ai_generate_results(query, "general web research", num_results)
     for r in results:
-        if r.get("link") and not r.get("company_name"):
-            scraped = await _scrape_company_website(r.get("title", ""))
-            r["website"] = scraped.get("website", "")
+        if r.get("link") and not r.get("contact_email"):
+            r = _enrich_page(r["link"], r)
     return results
 
 
@@ -151,6 +258,7 @@ async def search_business_directories(query: str, num_results: int = 10) -> list
     directories = [
         f"https://www.google.com/search?q={quote_plus(query + ' site:crunchbase.com OR site:linkedin.com/company OR site:angellist.com')}",
         f"https://www.bing.com/search?q={quote_plus(query + ' startup directory')}",
+        f"https://html.duckduckgo.com/html/?q={quote_plus(query + ' company contact email phone')}",
     ]
     for url in directories:
         html = await _scrape_html(url)
@@ -161,17 +269,13 @@ async def search_business_directories(query: str, num_results: int = 10) -> list
                     break
                 href = a.get("href", "")
                 text = a.get_text(strip=True)
-                if text and any(d in href for d in ["crunchbase", "linkedin", "angellist", "g2.com", "capterra"]):
-                    results.append({
-                        "title": text,
-                        "link": href,
-                        "snippet": "",
-                        "company_name": text,
-                        "contact_name": "",
-                        "contact_title": "",
-                        "industry": "",
-                        "location": "",
-                    })
+                if text and len(text) > 3:
+                    result_item = _result(
+                        title=text, link=href,
+                        company_name=text,
+                    )
+                    result_item = _enrich_page(href, result_item)
+                    results.append(result_item)
     if not results:
         results = await _ai_generate_results(query, "business directories", num_results)
     return results
@@ -182,13 +286,7 @@ async def search_company_websites(query: str, num_results: int = 10) -> list[dic
     enriched = []
     for r in results:
         if r.get("link"):
-            html = await _scrape_html(r["link"])
-            if html:
-                text = await _extract_text(html)
-                emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
-                r["contact_email"] = emails[0] if emails else ""
-                names = re.findall(r"(?:VP|Director|Head|Chief|Manager)\s+of\s+\w+", text)
-                r["contact_title"] = names[0] if names else ""
+            r = _enrich_page(r["link"], r)
         enriched.append(r)
     if not enriched:
         enriched = await _ai_generate_results(query, "company websites", num_results)
@@ -208,20 +306,72 @@ async def search_news_sites(query: str, num_results: int = 10) -> list[dict]:
                 title_el = article.select_one("a[href^='./']")
                 if title_el:
                     href = title_el.get("href", "").replace("./", "https://news.google.com/")
-                    results.append({
-                        "title": title_el.get_text(strip=True),
-                        "link": href,
-                        "snippet": "",
-                        "company_name": "",
-                        "contact_name": "",
-                        "contact_title": "",
-                        "industry": "",
-                        "location": "",
-                    })
+                    company = title_el.get_text(strip=True)
+                    result_item = _result(
+                        title=company, link=href,
+                        company_name=company,
+                    )
+                    result_item = _enrich_page(href, result_item)
+                    results.append(result_item)
     except Exception as e:
         logger.warning("News search failed: %s", e)
     if not results:
         results = await _ai_generate_results(query, "news sites", num_results)
+    return results
+
+
+async def search_startup_directories(query: str, num_results: int = 10) -> list[dict]:
+    results = []
+    for site in ["crunchbase.com", "angellist.com", "producthunt.com"]:
+        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query + ' site:' + site)}"
+        html = await _scrape_html(url)
+        if html:
+            soup = BeautifulSoup(html, "html.parser")
+            for result in soup.select(".result"):
+                if len(results) >= num_results:
+                    break
+                title_el = result.select_one(".result__title a")
+                if title_el:
+                    href = title_el.get("href", "")
+                    match = re.search(r"uddg=(https?://[^&]+)", href)
+                    link = match.group(1) if match else href
+                    company = title_el.get_text(strip=True)
+                    result_item = _result(
+                        title=company, link=link,
+                        company_name=company,
+                    )
+                    result_item = _enrich_page(link, result_item)
+                    results.append(result_item)
+    if not results:
+        results = await _ai_generate_results(query, "startup directories", num_results)
+    return results
+
+
+async def search_industry_listings(query: str, num_results: int = 10) -> list[dict]:
+    results = []
+    url = f"https://html.duckduckgo.com/html/?q={quote_plus(query + ' companies list directory')}"
+    html = await _scrape_html(url)
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
+        for result in soup.select(".result"):
+            if len(results) >= num_results:
+                break
+            title_el = result.select_one(".result__title a")
+            snippet_el = result.select_one(".result__snippet")
+            if title_el:
+                href = title_el.get("href", "")
+                match = re.search(r"uddg=(https?://[^&]+)", href)
+                link = match.group(1) if match else href
+                snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                company = title_el.get_text(strip=True)
+                result_item = _result(
+                    title=company, link=link, snippet=snippet,
+                    company_name=company,
+                )
+                result_item = _enrich_page(link, result_item)
+                results.append(result_item)
+    if not results:
+        results = await _ai_generate_results(query, "industry listings", num_results)
     return results
 
 
@@ -232,6 +382,8 @@ SEARCH_HANDLERS = {
     "business_directories": search_business_directories,
     "company_websites": search_company_websites,
     "news_sites": search_news_sites,
+    "startup_directories": search_startup_directories,
+    "industry_listings": search_industry_listings,
 }
 
 

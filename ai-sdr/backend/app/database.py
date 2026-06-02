@@ -126,6 +126,23 @@ async def init_db() -> bool:
                     except Exception:
                         pass
 
+                for col in [
+                    "ADD COLUMN business_type VARCHAR(255)",
+                    "ADD COLUMN city VARCHAR(255)",
+                    "ADD COLUMN state VARCHAR(255)",
+                    "ADD COLUMN country VARCHAR(100)",
+                    "ADD COLUMN postal_code VARCHAR(20)",
+                ]:
+                    try:
+                        await conn.execute(text("SAVEPOINT mig_sp"))
+                        await conn.execute(text(f"ALTER TABLE research_results {col}"))
+                        await conn.execute(text("RELEASE SAVEPOINT mig_sp"))
+                    except Exception:
+                        try:
+                            await conn.execute(text("ROLLBACK TO SAVEPOINT mig_sp"))
+                        except Exception:
+                            pass
+
             return True
         except Exception as e:
             import traceback

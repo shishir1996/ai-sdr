@@ -106,7 +106,12 @@ class ResearchResult(Base):
     contact_phone = Column(String(50), nullable=True)
     website = Column(String(500), nullable=True)
     industry = Column(String(255), nullable=True)
+    business_type = Column(String(255), nullable=True)
     location = Column(String(255), nullable=True)
+    city = Column(String(255), nullable=True)
+    state = Column(String(255), nullable=True)
+    country = Column(String(100), nullable=True)
+    postal_code = Column(String(20), nullable=True)
     raw_data = Column(JSON, nullable=True)
 
     status = Column(String(50), default="new")
