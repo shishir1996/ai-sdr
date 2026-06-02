@@ -64,7 +64,7 @@ export default function VPDashboardPage() {
     try {
       const dec = await api.post<any>("/vp/decide")
       setLastResult(dec)
-      setDecisions((prev: any[]) => [{ action_type: dec.action, reasoning: dec.reasoning, details: { summary: dec.summary, actions: dec.actions_executed }, created_at: new Date().toISOString() }, ...prev])
+      setDecisions((prev: any[]) => [{ action_type: dec.action, reasoning: dec.reasoning, details: { actions: dec.actions_executed }, created_at: new Date().toISOString() }, ...prev])
       load()
     } catch (e) {
       console.error(e)
@@ -180,7 +180,7 @@ export default function VPDashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: "Active Agents", value: dashboard?.active_agents ?? 0, color: "text-emerald-400" },
-          { label: "Leads Collected", value: dashboard?.leads_collected ?? 0, color: "text-blue-400" },
+          { label: "CRM Leads", value: dashboard?.crm_leads ?? 0, color: "text-blue-400" },
           { label: "SDRs Created", value: dashboard?.sdrs_created ?? 0, color: "text-purple-400" },
           { label: "Meetings Generated", value: dashboard?.meetings_generated ?? 0, color: "text-amber-400" },
         ].map((stat) => (
@@ -218,6 +218,31 @@ export default function VPDashboardPage() {
           )}
         </div>
       </div>
+
+      {lastResult && (
+        <div className="p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+          <h3 className="text-emerald-400 font-medium mb-1">Execution Result</h3>
+          <p className="text-sm text-gray-300">{lastResult.reasoning}</p>
+          {lastResult.actions_executed && lastResult.actions_executed.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {lastResult.actions_executed.map((a: string, i: number) => (
+                <span key={i} className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded text-[10px]">{a}</span>
+              ))}
+            </div>
+          )}
+          {(lastResult.leads_before !== undefined || lastResult.leads_after !== undefined) && (
+            <div className="flex gap-4 mt-3 text-xs text-gray-400">
+              <span>Leads: {lastResult.leads_before} → {lastResult.leads_after}</span>
+              <span>SDRs: {lastResult.sdrs_before} → {lastResult.sdrs_after}</span>
+            </div>
+          )}
+          <div className="flex gap-3 mt-3">
+            <a href="/leads" className="text-xs text-emerald-400 hover:text-emerald-300 underline">View Leads →</a>
+            <a href="/vp/agents" className="text-xs text-emerald-400 hover:text-emerald-300 underline">View Agents →</a>
+            <a href="/sdr" className="text-xs text-emerald-400 hover:text-emerald-300 underline">View SDRs →</a>
+          </div>
+        </div>
+      )}
 
       <div className="p-4 bg-[#1a1a2e] rounded-lg border border-gray-800">
         <h2 className="text-lg font-semibold text-white mb-3">Recent Decisions &amp; Reasoning</h2>

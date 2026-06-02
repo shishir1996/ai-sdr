@@ -357,6 +357,12 @@ async def get_vp_dashboard(db: AsyncSession, org_id: str, vp_id: str) -> dict:
         "active_agents": len([a for a in all_agents if a.status == "running"]),
         "total_agents": len(all_agents),
         "leads_collected": total_research_leads,
+        "crm_leads": await db.scalar(
+            select(func.count(Lead.id)).where(
+                Lead.org_id == org_id,
+                Lead.deleted_at.is_(None),
+            )
+        ) or 0,
         "unconverted_research": await db.scalar(
             select(func.count(ResearchResult.id)).where(
                 ResearchResult.org_id == org_id,
