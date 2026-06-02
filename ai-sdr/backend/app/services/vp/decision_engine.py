@@ -93,105 +93,183 @@ async def log_vp_action(
     await db.flush()
 
 
-async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
-    situation = await assess_lead_situation(db, org_id, vp)
+async def _create_auto_agent(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
+    queries = [
+        f"companies looking for {vp.product_name or 'our product'}",
+        f"{vp.target_country or ''} {vp.product_name or ''} decision makers".strip(),
+        f"{vp.icp_description or vp.target_audience or ''} executives".strip(),
+    ]
+    queries = [q for q in queries if q and not q.isspace()]
+    if not queries:
+        queries = ["potential clients in our target market", "decision makers in our industry"]
+    agent = await create_research_agent(
+        db=db, org_id=org_id, vp_id=vp.id,
+        name=f"Auto-Agent - {vp.product_name or 'Prospecting'}",
+        search_queries="\n".join(queries),
+        target_industry=vp.icp_description or "",
+        target_country=vp.target_country or "",
+        target_audience=vp.target_audience or "",
+        max_leads=100,
+    )
+    await log_vp_action(db, org_id, vp.id, "agent_created",
+                        f"Created research agent '{agent.name}' with {len(queries)} queries", {"queries": queries})
+    leads_found = await execute_research(db, agent.id)
+    await log_vp_action(db, org_id, vp.id, "research_completed",
+                        f"Agent '{agent.name}' discovered {leads_found} leads across {len(queries)} queries",
+                        {"leads_found": leads_found, "queries_count": len(queries)})
+    return {"agent": agent, "leads_found": leads_found}
 
-    actions_taken = []
 
-    try:
-        decision = await _ai_decision(situation, vp)
-    except Exception as e:
-        logger.info("AI decision unavailable (%s), using rule-based", e)
-        decision = _rule_based_decision(situation)
+async def _convert_all_research(db: AsyncSession, org_id: str, vp_id: str) -> int:
+    result = await db.execute(
+        select(ResearchResult).where(
+            ResearchResult.org_id == org_id,
+            ResearchResult.converted_to_lead == False,
+        )
+    )
+    converted = 0
+    for row in result.scalars().all():
+        lead_id = await convert_to_lead(db, org_id, row.id)
+        if lead_id:
+            converted += 1
+    if converted:
+        await log_vp_action(db, org_id, vp_id, "leads_converted",
+                            f"Converted {converted} research results to CRM leads", {"count": converted})
+    return converted
 
-    action = decision.get("action", "monitor")
-    reasoning = decision.get("reasoning", "")
 
-    if action == "create_research_agent":
-        queries = decision.get("suggested_queries", [])
-        if not queries and vp.product_name:
-            queries = [
-                f"companies looking for {vp.product_name}",
-                f"{vp.target_country or ''} {vp.product_name} buyers".strip(),
-                f"{vp.product_name} decision makers".strip(),
-            ]
-        if queries:
-            agent = await create_research_agent(
-                db=db, org_id=org_id, vp_id=vp.id,
-                name=f"Auto-Agent - {vp.product_name or 'Prospecting'}",
-                search_queries="\n".join(queries),
-                target_industry=vp.icp_description or "",
-                target_country=vp.target_country or "",
-                target_audience="",
-                max_leads=50,
-            )
-            await log_vp_action(db, org_id, vp.id, "agent_created",
-                                f"Created research agent '{agent.name}' with {len(queries)} queries", {})
-            leads_found = await execute_research(db, agent.id)
-            await log_vp_action(db, org_id, vp.id, "research_completed",
-                                f"Agent '{agent.name}' found {leads_found} leads", {"leads_found": leads_found})
-            actions_taken.append(f"Created agent '{agent.name}' and found {leads_found} leads")
-
-    elif action == "convert_research_to_leads":
-        converted = 0
-        result = await db.execute(
-            select(ResearchResult).where(
-                ResearchResult.org_id == org_id,
-                ResearchResult.converted_to_lead == False,
+async def _assign_leads_to_sdr(db: AsyncSession, org_id: str, sdr_id: str) -> int:
+    from app.models.agent import LeadState
+    result = await db.execute(
+        select(Lead).where(
+            Lead.org_id == org_id,
+            Lead.deleted_at.is_(None),
+        )
+    )
+    leads = list(result.scalars().all())
+    assigned = 0
+    for lead in leads:
+        existing = await db.execute(
+            select(LeadState).where(
+                LeadState.org_id == org_id,
+                LeadState.lead_id == lead.id,
+                LeadState.sdr_profile_id == sdr_id,
             )
         )
-        for row in result.scalars().all():
-            lead_id = await convert_to_lead(db, org_id, row.id)
-            if lead_id:
-                converted += 1
-        if converted:
-            await log_vp_action(db, org_id, vp.id, "leads_converted",
-                                f"Converted {converted} research results to leads", {"count": converted})
-            actions_taken.append(f"Converted {converted} research results to leads")
+        if existing.scalar_one_or_none():
+            continue
+        ls = LeadState(
+            org_id=org_id, lead_id=lead.id, sdr_profile_id=sdr_id,
+            state="new", priority=50,
+        )
+        db.add(ls)
+        assigned += 1
+    if assigned:
+        await db.flush()
+    return assigned
 
-    elif action == "create_sdr":
-        sdr_name = decision.get("sdr_recommendation", {}).get("name") or f"SDR - {vp.product_name or 'Outreach'}"
+
+async def _create_auto_campaign(db: AsyncSession, org_id: str, sdr_id: str, vp: VPSalesProfile) -> str:
+    from app.models.campaign import Campaign, CampaignStep
+    campaign = Campaign(
+        org_id=org_id, sdr_profile_id=sdr_id,
+        name=f"{vp.product_name or 'Outreach'} Campaign",
+        description=f"Auto-generated campaign for {vp.product_name or 'prospecting'}. Target: {vp.target_country or 'global'}",
+        status="active", ai_generated=True,
+    )
+    db.add(campaign)
+    await db.flush()
+
+    step1 = CampaignStep(
+        campaign_id=campaign.id, step_order=1, channel="email", delay_days=0,
+    )
+    step2 = CampaignStep(
+        campaign_id=campaign.id, step_order=2, channel="email", delay_days=3,
+    )
+    step3 = CampaignStep(
+        campaign_id=campaign.id, step_order=3, channel="call", delay_days=7,
+    )
+    db.add_all([step1, step2, step3])
+    await db.flush()
+
+    await log_vp_action(db, org_id, vp.id, "campaign_created",
+                        f"Campaign '{campaign.name}' created for SDR {sdr_id}",
+                        {"campaign_id": campaign.id, "sdr_id": sdr_id, "steps": 3})
+    return campaign.id
+
+
+async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
+    situation = await assess_lead_situation(db, org_id, vp)
+    steps = []
+
+    if not vp.product_name and not vp.target_country:
+        await log_vp_action(db, org_id, vp.id, "setup_needed",
+                            "VP profile incomplete. Add product and target country.", {})
+        return {"action": "setup", "reasoning": "Fill in product and target country in VP profile", "actions_executed": []}
+
+    attempts = 0
+    while situation["total_leads"] < 50 and attempts < 3:
+        try:
+            r = await _create_auto_agent(db, org_id, vp)
+            steps.append(f"Research agent '{r['agent'].name}' created and found {r['leads_found']} leads")
+        except Exception as e:
+            logger.warning("Agent creation failed: %s", e)
+            steps.append(f"Research attempt {attempts + 1} failed: {e}")
+        attempts += 1
+        situation = await assess_lead_situation(db, org_id, vp)
+
+    situation2 = await assess_lead_situation(db, org_id, vp)
+    if situation2["unconverted_research"] > 0:
+        converted = await _convert_all_research(db, org_id, vp.id)
+        if converted:
+            steps.append(f"{converted} research results converted to CRM leads")
+
+    situation3 = await assess_lead_situation(db, org_id, vp)
+    sdr_id = None
+    if situation3["total_leads"] > 0 and situation3["active_sdrs"] == 0:
+        sdr_name = f"SDR - {vp.product_name or 'Outreach'}"
         try:
             sdr = SDRProfile(
-                org_id=org_id,
-                name=sdr_name,
-                sell_type="product",
-                product_name=vp.product_name or "",
-                product_description=vp.product_description or "",
-                service_description=vp.service_description or "",
-                target_country=vp.target_country or "",
-                target_titles=decision.get("sdr_recommendation", {}).get("focus", ""),
-                target_industries=vp.icp_description or "",
+                org_id=org_id, name=sdr_name, sell_type="product",
+                product_name=vp.product_name or "", product_description=vp.product_description or "",
+                service_description=vp.service_description or "", target_country=vp.target_country or "",
+                target_titles=vp.target_titles or "", target_industries=vp.icp_description or "",
                 is_active=True,
             )
             db.add(sdr)
             await db.flush()
+            sdr_id = sdr.id
+            assigned = await _assign_leads_to_sdr(db, org_id, sdr_id)
             await log_vp_action(db, org_id, vp.id, "sdr_created",
-                                f"Created SDR '{sdr_name}'", {"sdr_id": sdr.id})
-            actions_taken.append(f"Created SDR '{sdr_name}'")
+                                f"SDR '{sdr_name}' created and activated with {assigned} leads assigned",
+                                {"sdr_id": sdr_id, "leads_assigned": assigned})
+            steps.append(f"SDR '{sdr_name}' created and activated with {assigned} leads")
         except Exception as e:
-            logger.warning("Failed to create SDR: %s", e)
-            actions_taken.append(f"Failed to create SDR: {e}")
+            logger.warning("SDR creation failed: %s", e)
+            steps.append(f"SDR creation failed: {e}")
 
-    elif action == "assign_campaign":
-        await log_vp_action(db, org_id, vp.id, "campaign_check",
-                            "Campaign assignment logic triggered", {})
-        actions_taken.append("Campaign readiness checked")
+    if sdr_id:
+        try:
+            campaign_id = await _create_auto_campaign(db, org_id, sdr_id, vp)
+            steps.append(f"Campaign created and activated for SDR")
+        except Exception as e:
+            logger.warning("Campaign creation failed: %s", e)
+            steps.append(f"Campaign creation failed: {e}")
 
-    else:
+    situation4 = await assess_lead_situation(db, org_id, vp)
+    if not steps:
         await log_vp_action(db, org_id, vp.id, "monitor",
-                            "All systems running. Monitoring.", {})
-        actions_taken.append("Monitoring - no action needed")
-
-    new_situation = await assess_lead_situation(db, org_id, vp)
+                            "All systems operational. Monitoring.", {})
+        steps.append("All systems running — monitoring only")
 
     return {
-        "action": action,
-        "reasoning": reasoning,
-        "summary": "; ".join(actions_taken) if actions_taken else "No actions taken",
-        "actions_executed": actions_taken,
-        "situation_before": situation,
-        "situation_after": new_situation,
+        "action": "pipeline_executed",
+        "reasoning": "; ".join(steps),
+        "actions_executed": steps,
+        "leads_before": situation["total_leads"],
+        "leads_after": situation4["total_leads"],
+        "sdrs_before": situation["total_sdrs"],
+        "sdrs_after": situation4["total_sdrs"],
     }
 
 
