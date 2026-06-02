@@ -46,18 +46,22 @@ export default function VPDashboardPage() {
 
   useEffect(() => { load() }, [])
 
+  const [executing, setExecuting] = useState(false)
+  const [lastResult, setLastResult] = useState<any>(null)
+  const [vpError, setVpError] = useState("")
+  const [saving, setSaving] = useState(false)
+
   const createVP = async () => {
+    setVpError("")
     try {
       await api.post("/vp/profile", form)
       setShowWizard(false)
       load()
-    } catch (e) {
+    } catch (e: any) {
+      setVpError(e.message || "Failed to create VP profile")
       console.error(e)
     }
   }
-
-  const [executing, setExecuting] = useState(false)
-  const [lastResult, setLastResult] = useState<any>(null)
 
   const runDecision = async () => {
     setExecuting(true)
@@ -91,7 +95,6 @@ export default function VPDashboardPage() {
     target_business_types: "",
     icp_description: "",
   })
-  const [saving, setSaving] = useState(false)
 
   const openEdit = () => {
     if (!vp) return
@@ -180,6 +183,7 @@ export default function VPDashboardPage() {
                 <textarea className="w-full bg-[#1a1a2e] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-20" value={form.target_business_types} onChange={(e) => setForm({ ...form, target_business_types: e.target.value })} placeholder="restaurants, salons, small businesses" />
               </div>
             </div>
+            {vpError && <p className="text-red-400 text-sm">{vpError}</p>}
             <button onClick={createVP} className="w-full py-3 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors">
               Create VP Sales AI
             </button>

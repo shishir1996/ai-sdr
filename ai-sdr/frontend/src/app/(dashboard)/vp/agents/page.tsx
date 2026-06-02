@@ -35,8 +35,8 @@ export default function VPResearchAgentsPage() {
     try {
       await api.delete(`/vp/agents/${agentId}`)
       load()
-    } catch (e) {
-      console.error(e)
+    } catch (e: any) {
+      alert("Failed to delete: " + (e.message || "Unknown error"))
     }
   }
 

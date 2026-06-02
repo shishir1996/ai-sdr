@@ -96,6 +96,9 @@ async def create_vp_profile(
         target_country=req.target_country,
         target_audience=req.target_audience,
         sales_objectives=req.sales_objectives,
+        target_titles=req.target_titles,
+        target_business_types=req.target_business_types,
+        outreach_active=bool(req.outreach_active) if req.outreach_active is not None else False,
     )
     db.add(vp)
     await db.flush()
