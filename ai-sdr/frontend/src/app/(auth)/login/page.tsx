@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef, useMemo, Suspense } from "react"
 import { useAuth } from "@/hooks/useAuth"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -303,7 +303,7 @@ function CountryCodeSelect({ value, onChange }: { value: string; onChange: (v: s
 }
 
 /* ─── Login Page ─── */
-export default function LoginPage() {
+function LoginPageContent() {
   const [isSignup, setIsSignup] = useState(false)
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -721,6 +721,14 @@ export default function LoginPage() {
         </motion.div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-pulse text-muted-foreground">Loading...</div></div>}>
+      <LoginPageContent />
+    </Suspense>
   )
 }
 
