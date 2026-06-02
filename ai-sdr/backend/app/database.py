@@ -113,12 +113,18 @@ async def init_db() -> bool:
                 if missing and has_feature_flags:
                     _log.warning("=== Tables MISSING after create_all (will be ignored): %s ===", sorted(missing))
 
+                # Use SAVEPOINT so ALTER TABLE failure doesn't abort the entire transaction
                 try:
+                    await conn.execute(text("SAVEPOINT alter_savepoint"))
                     await conn.execute(
                         text("ALTER TABLE email_messages ADD COLUMN direction VARCHAR(20) DEFAULT 'outbound'")
                     )
+                    await conn.execute(text("RELEASE SAVEPOINT alter_savepoint"))
                 except Exception:
-                    pass
+                    try:
+                        await conn.execute(text("ROLLBACK TO SAVEPOINT alter_savepoint"))
+                    except Exception:
+                        pass
 
             return True
         except Exception as e:
