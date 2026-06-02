@@ -27,6 +27,8 @@ class VPCreateRequest(BaseModel):
     target_country: Optional[str] = None
     target_audience: Optional[str] = None
     sales_objectives: Optional[str] = None
+    target_titles: Optional[str] = None
+    outreach_active: Optional[bool] = None
 
 
 class ResearchAgentCreateRequest(BaseModel):
@@ -61,6 +63,8 @@ async def get_vp_profile(
         "target_country": vp.target_country,
         "target_audience": vp.target_audience,
         "sales_objectives": vp.sales_objectives,
+        "target_titles": vp.target_titles,
+        "outreach_active": bool(vp.outreach_active),
         "is_active": vp.is_active,
         "created_at": vp.created_at.isoformat() if vp.created_at else None,
         "updated_at": vp.updated_at.isoformat() if vp.updated_at else None,
@@ -115,10 +119,12 @@ async def update_vp_profile(
 
     for field in ["name", "product_name", "product_description", "service_description",
                   "business_goals", "icp_description", "target_country", "target_audience",
-                  "sales_objectives"]:
+                  "sales_objectives", "target_titles"]:
         value = getattr(req, field, None)
         if value is not None:
             setattr(vp, field, value)
+    if req.outreach_active is not None:
+        vp.outreach_active = req.outreach_active
     await db.flush()
     return {"message": "VP profile updated"}
 
@@ -303,3 +309,63 @@ async def vp_situation(
         return {"error": "no_vp"}
     situation = await assess_lead_situation(db, user.org_id, vp)
     return situation
+
+
+@router.post("/toggle-outreach")
+async def toggle_outreach(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(VPSalesProfile).where(VPSalesProfile.org_id == user.org_id)
+    )
+    vp = result.scalar_one_or_none()
+    if not vp:
+        raise HTTPException(status_code=404, detail="VP profile not found")
+    vp.outreach_active = not vp.outreach_active
+    await db.flush()
+    await log_vp_action(db, user.org_id, vp.id, "outreach_toggled",
+                        f"AI Sales Team {'ACTIVATED' if vp.outreach_active else 'DEACTIVATED'}")
+    return {"outreach_active": bool(vp.outreach_active), "message": f"AI Sales Team {'activated' if vp.outreach_active else 'deactivated'}"}
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_research_agent(
+    agent_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ResearchAgent).where(
+            ResearchAgent.id == agent_id,
+            ResearchAgent.org_id == user.org_id,
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Research agent not found")
+    await db.delete(agent)
+    await db.flush()
+    return {"message": f"Research agent '{agent.name}' deleted"}
+
+
+@router.delete("/sdrs/{sdr_id}")
+async def remove_sdr(
+    sdr_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.agent import SDRProfile
+    result = await db.execute(
+        select(SDRProfile).where(
+            SDRProfile.id == sdr_id,
+            SDRProfile.org_id == user.org_id,
+        )
+    )
+    sdr = result.scalar_one_or_none()
+    if not sdr:
+        raise HTTPException(status_code=404, detail="SDR not found")
+    sdr.is_active = False
+    sdr.deleted_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    await db.flush()
+    return {"message": f"SDR '{sdr.name}' removed"}

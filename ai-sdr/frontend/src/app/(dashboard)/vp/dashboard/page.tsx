@@ -73,6 +73,16 @@ export default function VPDashboardPage() {
     }
   }
 
+  const toggleOutreach = async () => {
+    try {
+      const res = await api.post<any>("/vp/toggle-outreach")
+      setDashboard((prev: any) => ({ ...prev, outreach_active: res.outreach_active }))
+      load()
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -171,10 +181,16 @@ export default function VPDashboardPage() {
           <h1 className="text-2xl font-bold text-white">VP Sales Dashboard</h1>
           <p className="text-sm text-gray-400 mt-1">{vp.name} &middot; {vp.target_country || "No country set"}</p>
         </div>
-        <button onClick={runDecision} disabled={executing} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-          {executing ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" /> : null}
-          {executing ? "Executing..." : "Run Decision Engine"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={toggleOutreach} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${dashboard?.outreach_active ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"}`}>
+            <span className={`h-2 w-2 rounded-full ${dashboard?.outreach_active ? "bg-green-400 animate-pulse" : "bg-gray-400"}`} />
+            {dashboard?.outreach_active ? "AI Sales Team Active" : "Launch AI Sales Team"}
+          </button>
+          <button onClick={runDecision} disabled={executing} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            {executing ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" /> : null}
+            {executing ? "Executing..." : "Run Decision Engine"}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

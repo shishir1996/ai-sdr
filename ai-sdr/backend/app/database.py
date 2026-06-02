@@ -143,6 +143,20 @@ async def init_db() -> bool:
                         except Exception:
                             pass
 
+                for col in [
+                    "ADD COLUMN outreach_active BOOLEAN DEFAULT FALSE",
+                    "ADD COLUMN target_titles TEXT",
+                ]:
+                    try:
+                        await conn.execute(text("SAVEPOINT mig_sp2"))
+                        await conn.execute(text(f"ALTER TABLE vp_sales_profiles {col}"))
+                        await conn.execute(text("RELEASE SAVEPOINT mig_sp2"))
+                    except Exception:
+                        try:
+                            await conn.execute(text("ROLLBACK TO SAVEPOINT mig_sp2"))
+                        except Exception:
+                            pass
+
             return True
         except Exception as e:
             import traceback

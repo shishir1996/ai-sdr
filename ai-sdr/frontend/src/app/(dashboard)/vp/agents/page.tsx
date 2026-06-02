@@ -30,6 +30,16 @@ export default function VPResearchAgentsPage() {
     }
   }
 
+  const deleteAgent = async (agentId: string, name: string) => {
+    if (!confirm(`Delete research agent "${name}"? This cannot be undone.`)) return
+    try {
+      await api.delete(`/vp/agents/${agentId}`)
+      load()
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -73,7 +83,7 @@ export default function VPResearchAgentsPage() {
                     {agent.target_country && `${agent.target_country}`}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3">
                   <span className={`px-2 py-1 rounded text-xs font-medium ${
                     agent.status === "running" ? "bg-emerald-500/10 text-emerald-400" :
                     agent.status === "completed" ? "bg-blue-500/10 text-blue-400" :
@@ -87,6 +97,12 @@ export default function VPResearchAgentsPage() {
                     className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
                   >
                     Run
+                  </button>
+                  <button
+                    onClick={() => deleteAgent(agent.id, agent.name)}
+                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded text-xs font-medium transition-colors"
+                  >
+                    Delete
                   </button>
                 </div>
               </div>

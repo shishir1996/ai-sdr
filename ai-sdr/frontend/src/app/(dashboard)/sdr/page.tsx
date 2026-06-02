@@ -104,6 +104,14 @@ export default function SDRListPage() {
     } catch (e) { console.error(e) }
   }
 
+  const deleteSDR = async (sdr: any) => {
+    if (!confirm(`Remove SDR "${sdr.name}"? It will be deactivated and hidden.`)) return
+    try {
+      await api.delete(`/vp/sdrs/${sdr.id}`)
+      await load()
+    } catch (e) { console.error(e) }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -213,17 +221,26 @@ export default function SDRListPage() {
                       </div>
                     </div>
                   </div>
-                  <button
-                    onClick={(e) => { e.preventDefault(); toggleActivation(sdr) }}
-                    className={`p-2 rounded-lg transition-colors shrink-0 ${
-                      sdr.is_active
-                        ? "hover:bg-red-500/10 text-red-500 hover:text-red-400"
-                        : "hover:bg-green-500/10 text-green-500 hover:text-green-400"
-                    }`}
-                    title={sdr.is_active ? "Deactivate" : "Activate"}
-                  >
-                    {sdr.is_active ? <Square size={15} /> : <Play size={15} />}
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={(e) => { e.preventDefault(); toggleActivation(sdr) }}
+                      className={`p-2 rounded-lg transition-colors ${
+                        sdr.is_active
+                          ? "hover:bg-red-500/10 text-red-500 hover:text-red-400"
+                          : "hover:bg-green-500/10 text-green-500 hover:text-green-400"
+                      }`}
+                      title={sdr.is_active ? "Deactivate" : "Activate"}
+                    >
+                      {sdr.is_active ? <Square size={15} /> : <Play size={15} />}
+                    </button>
+                    <button
+                      onClick={(e) => { e.preventDefault(); deleteSDR(sdr) }}
+                      className="p-2 rounded-lg hover:bg-red-500/10 text-red-500/50 hover:text-red-400 transition-colors"
+                      title="Remove SDR"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 mb-3">
