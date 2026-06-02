@@ -95,7 +95,7 @@ async def decide_next_action(db: AsyncSession, org_id: str, vp: VPSalesProfile) 
         f"Only return valid JSON."
     )
     try:
-        result = await generate_text(prompt, model="claude-3-haiku")
+        result = await generate_text("", prompt)
         import json
         decision = json.loads(result.strip())
         return decision
