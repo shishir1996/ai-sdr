@@ -113,8 +113,8 @@ def _guess_company_title(text: str) -> str:
     return ""
 
 
-def _enrich_page(url: str, existing: dict) -> dict:
-    html = _scrape_html(url)
+async def _enrich_page(url: str, existing: dict) -> dict:
+    html = await _scrape_html(url)
     if not html:
         return existing
     text = _extract_text(html)
@@ -200,7 +200,7 @@ async def _duckduckgo_search(query: str, num_results: int = 10) -> list[dict]:
                         title=company, link=link, snippet=snippet,
                         company_name=company,
                     )
-                    result_item = _enrich_page(link, result_item)
+                    result_item = await _enrich_page(link, result_item)
                     results.append(result_item)
     except Exception as e:
         logger.warning("DuckDuckGo search failed: %s", e)
@@ -234,7 +234,7 @@ async def search_bing(query: str, num_results: int = 10) -> list[dict]:
                         title=company, link=link, snippet=snippet,
                         company_name=company,
                     )
-                    result_item = _enrich_page(link, result_item)
+                    result_item = await _enrich_page(link, result_item)
                     results.append(result_item)
     except Exception as e:
         logger.warning("Bing search failed: %s", e)
@@ -249,7 +249,7 @@ async def search_web_general(query: str, num_results: int = 10) -> list[dict]:
         results = await _ai_generate_results(query, "general web research", num_results)
     for r in results:
         if r.get("link") and not r.get("contact_email"):
-            r = _enrich_page(r["link"], r)
+            r = await _enrich_page(r["link"], r)
     return results
 
 
@@ -274,7 +274,7 @@ async def search_business_directories(query: str, num_results: int = 10) -> list
                         title=text, link=href,
                         company_name=text,
                     )
-                    result_item = _enrich_page(href, result_item)
+                    result_item = await _enrich_page(href, result_item)
                     results.append(result_item)
     if not results:
         results = await _ai_generate_results(query, "business directories", num_results)
@@ -286,7 +286,7 @@ async def search_company_websites(query: str, num_results: int = 10) -> list[dic
     enriched = []
     for r in results:
         if r.get("link"):
-            r = _enrich_page(r["link"], r)
+            r = await _enrich_page(r["link"], r)
         enriched.append(r)
     if not enriched:
         enriched = await _ai_generate_results(query, "company websites", num_results)
@@ -311,7 +311,7 @@ async def search_news_sites(query: str, num_results: int = 10) -> list[dict]:
                         title=company, link=href,
                         company_name=company,
                     )
-                    result_item = _enrich_page(href, result_item)
+                    result_item = await _enrich_page(href, result_item)
                     results.append(result_item)
     except Exception as e:
         logger.warning("News search failed: %s", e)
@@ -340,7 +340,7 @@ async def search_startup_directories(query: str, num_results: int = 10) -> list[
                         title=company, link=link,
                         company_name=company,
                     )
-                    result_item = _enrich_page(link, result_item)
+                    result_item = await _enrich_page(link, result_item)
                     results.append(result_item)
     if not results:
         results = await _ai_generate_results(query, "startup directories", num_results)
@@ -368,7 +368,7 @@ async def search_industry_listings(query: str, num_results: int = 10) -> list[di
                     title=company, link=link, snippet=snippet,
                     company_name=company,
                 )
-                result_item = _enrich_page(link, result_item)
+                result_item = await _enrich_page(link, result_item)
                 results.append(result_item)
     if not results:
         results = await _ai_generate_results(query, "industry listings", num_results)
