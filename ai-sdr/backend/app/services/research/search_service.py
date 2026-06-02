@@ -178,6 +178,23 @@ def _result(title="", link="", snippet="", company_name="",
     }
 
 
+def _extract_from_snippet(snippet: str) -> dict:
+    data = {}
+    if not snippet:
+        return data
+    phones = _extract_phones(snippet)
+    if phones:
+        data["contact_phone"] = phones[0]
+    emails = _extract_emails(snippet)
+    if emails:
+        data["contact_email"] = emails[0]
+    address = _parse_address(snippet)
+    for k in ("city", "state", "country", "postal_code"):
+        if address.get(k):
+            data[k] = address[k]
+    return data
+
+
 async def _duckduckgo_search(query: str, num_results: int = 10) -> list[dict]:
     results = []
     try:
@@ -196,11 +213,20 @@ async def _duckduckgo_search(query: str, num_results: int = 10) -> list[dict]:
                     link = match.group(1) if match else href
                     snippet = snippet_el.get_text(strip=True) if snippet_el else ""
                     company = title_el.get_text(strip=True)
+                    snippet_data = _extract_from_snippet(snippet)
                     result_item = _result(
                         title=company, link=link, snippet=snippet,
                         company_name=company,
+                        location=snippet_data.get("city", ""),
+                        city=snippet_data.get("city", ""),
+                        state=snippet_data.get("state", ""),
+                        country=snippet_data.get("country", ""),
+                        postal_code=snippet_data.get("postal_code", ""),
+                        contact_phone=snippet_data.get("contact_phone", ""),
+                        contact_email=snippet_data.get("contact_email", ""),
                     )
-                    result_item = await _enrich_page(link, result_item)
+                    if len(results) < 3:
+                        result_item = await _enrich_page(link, result_item)
                     results.append(result_item)
     except Exception as e:
         logger.warning("DuckDuckGo search failed: %s", e)
@@ -230,11 +256,20 @@ async def search_bing(query: str, num_results: int = 10) -> list[dict]:
                     link = title_el.get("href", "")
                     snippet = snippet_el.get_text(strip=True) if snippet_el else ""
                     company = title_el.get_text(strip=True)
+                    snippet_data = _extract_from_snippet(snippet)
                     result_item = _result(
                         title=company, link=link, snippet=snippet,
                         company_name=company,
+                        location=snippet_data.get("city", ""),
+                        city=snippet_data.get("city", ""),
+                        state=snippet_data.get("state", ""),
+                        country=snippet_data.get("country", ""),
+                        postal_code=snippet_data.get("postal_code", ""),
+                        contact_phone=snippet_data.get("contact_phone", ""),
+                        contact_email=snippet_data.get("contact_email", ""),
                     )
-                    result_item = await _enrich_page(link, result_item)
+                    if len(results) < 3:
+                        result_item = await _enrich_page(link, result_item)
                     results.append(result_item)
     except Exception as e:
         logger.warning("Bing search failed: %s", e)

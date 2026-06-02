@@ -94,15 +94,39 @@ async def log_vp_action(
     await db.flush()
 
 
-async def _create_auto_agent(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
-    queries = [
-        f"companies looking for {vp.product_name or 'our product'}",
-        f"{vp.target_country or ''} {vp.product_name or ''} decision makers".strip(),
-        f"{vp.icp_description or vp.target_audience or ''} executives".strip(),
-    ]
-    queries = [q for q in queries if q and not q.isspace()]
-    if not queries:
-        queries = ["potential clients in our target market", "decision makers in our industry"]
+async def _generate_queries(vp: VPSalesProfile) -> list[str]:
+    country = vp.target_country or ""
+    biz_types_str = vp.target_business_types or vp.icp_description or ""
+    biz_types = [b.strip().lower() for b in biz_types_str.replace(",", "\n").split("\n") if b.strip()]
+    if not biz_types:
+        biz_types = ["restaurant", "salon", "small business"]
+
+    product = vp.product_name or ""
+
+    queries = []
+    for bt in biz_types[:3]:
+        if country:
+            queries.append(f"{bt} owner {country} email contact")
+            queries.append(f"{bt} {country} phone number directory")
+            queries.append(f"{bt} {country} business listing contact info")
+        else:
+            queries.append(f"{bt} owner email address")
+            queries.append(f"{bt} business directory phone")
+            queries.append(f"{bt} owners list contact")
+
+    if product:
+        queries.append(f"{product} potential customers {country}".strip())
+
+    seen = set()
+    unique = []
+    for q in queries:
+        if q not in seen:
+            seen.add(q)
+            unique.append(q)
+    return unique[:6]
+
+
+async def _create_auto_agent(db: AsyncSession, org_id: str, vp: VPSalesProfile, queries: list[str]) -> dict:
     agent = await create_research_agent(
         db=db, org_id=org_id, vp_id=vp.id,
         name=f"Auto-Agent - {vp.product_name or 'Prospecting'}",
@@ -113,7 +137,8 @@ async def _create_auto_agent(db: AsyncSession, org_id: str, vp: VPSalesProfile) 
         max_leads=100,
     )
     await log_vp_action(db, org_id, vp.id, "agent_created",
-                        f"Created research agent '{agent.name}' with {len(queries)} queries", {"queries": queries})
+                        f"Created research agent '{agent.name}' with {len(queries)} business-owner queries",
+                        {"queries": queries})
     leads_found = await execute_research(db, agent.id)
     await log_vp_action(db, org_id, vp.id, "research_completed",
                         f"Agent '{agent.name}' discovered {leads_found} leads across {len(queries)} queries",
@@ -198,23 +223,29 @@ async def _create_auto_campaign(db: AsyncSession, org_id: str, sdr_id: str, vp: 
 
 async def _run_lead_generation(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> list[str]:
     steps = []
-    attempts = 0
-    while attempts < 3:
+    all_queries = await _generate_queries(vp)
+    if not all_queries:
+        all_queries = ["small business owners directory contact", "restaurant owners email list", "salon owners phone directory"]
+
+    chunk_size = max(2, len(all_queries) // 3)
+    for i in range(0, min(len(all_queries), 6), chunk_size):
+        queries_chunk = all_queries[i:i + chunk_size]
         try:
-            r = await _create_auto_agent(db, org_id, vp)
-            steps.append(f"Agent '{r['agent'].name}' found {r['leads_found']} leads")
+            r = await _create_auto_agent(db, org_id, vp, queries_chunk)
+            if r["leads_found"]:
+                steps.append(f"Agent '{r['agent'].name}' found {r['leads_found']} leads")
         except Exception as e:
             logger.warning("Agent creation failed: %s", e)
-            steps.append(f"Research attempt {attempts + 1} failed: {e}")
-        attempts += 1
+            steps.append(f"Research attempt failed: {e}")
+
     if steps:
         converted = await _convert_all_research(db, org_id, vp.id)
         if converted:
             steps.append(f"{converted} leads converted to CRM")
     else:
         await log_vp_action(db, org_id, vp.id, "research_skip",
-                            "Skipped research — leads already exist", {})
-        steps.append("Research skipped — sufficient leads exist")
+                            "No leads found from any search source. Try enabling more sources in Lead Sources page.", {})
+        steps.append("No leads found — enable more lead sources")
     return steps
 
 

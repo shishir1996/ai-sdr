@@ -20,6 +20,7 @@ export default function VPDashboardPage() {
     target_country: "",
     target_audience: "",
     sales_objectives: "",
+    target_business_types: "",
   })
 
   const load = async () => {
@@ -140,6 +141,10 @@ export default function VPDashboardPage() {
               <div className="col-span-2">
                 <label className="block text-sm text-gray-400 mb-1">Target Audience</label>
                 <input className="w-full bg-[#1a1a2e] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm" value={form.target_audience} onChange={(e) => setForm({ ...form, target_audience: e.target.value })} />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm text-gray-400 mb-1">Target Business Types <span className="text-gray-500">(e.g. restaurants, salons, small businesses — one per line)</span></label>
+                <textarea className="w-full bg-[#1a1a2e] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-20" value={form.target_business_types} onChange={(e) => setForm({ ...form, target_business_types: e.target.value })} placeholder="restaurants&#10;salons&#10;small businesses" />
               </div>
             </div>
             <button onClick={createVP} className="w-full py-3 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors">

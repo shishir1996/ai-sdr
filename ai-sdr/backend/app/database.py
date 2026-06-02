@@ -146,6 +146,7 @@ async def init_db() -> bool:
                 for col in [
                     "ADD COLUMN outreach_active BOOLEAN DEFAULT FALSE",
                     "ADD COLUMN target_titles TEXT",
+                    "ADD COLUMN target_business_types TEXT",
                 ]:
                     try:
                         await conn.execute(text("SAVEPOINT mig_sp2"))

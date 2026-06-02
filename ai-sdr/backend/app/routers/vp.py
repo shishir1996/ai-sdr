@@ -28,6 +28,7 @@ class VPCreateRequest(BaseModel):
     target_audience: Optional[str] = None
     sales_objectives: Optional[str] = None
     target_titles: Optional[str] = None
+    target_business_types: Optional[str] = None
     outreach_active: Optional[bool] = None
 
 
@@ -64,6 +65,7 @@ async def get_vp_profile(
         "target_audience": vp.target_audience,
         "sales_objectives": vp.sales_objectives,
         "target_titles": vp.target_titles,
+        "target_business_types": vp.target_business_types,
         "outreach_active": bool(vp.outreach_active),
         "is_active": vp.is_active,
         "created_at": vp.created_at.isoformat() if vp.created_at else None,
@@ -119,7 +121,7 @@ async def update_vp_profile(
 
     for field in ["name", "product_name", "product_description", "service_description",
                   "business_goals", "icp_description", "target_country", "target_audience",
-                  "sales_objectives", "target_titles"]:
+                  "sales_objectives", "target_titles", "target_business_types"]:
         value = getattr(req, field, None)
         if value is not None:
             setattr(vp, field, value)

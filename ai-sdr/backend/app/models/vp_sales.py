@@ -32,6 +32,7 @@ class VPSalesProfile(Base):
     is_active = Column(Boolean, default=True)
     outreach_active = Column(Boolean, default=False)
     target_titles = Column(Text, nullable=True)
+    target_business_types = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
