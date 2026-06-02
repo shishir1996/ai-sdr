@@ -84,6 +84,39 @@ export default function VPDashboardPage() {
     }
   }
 
+  const [showEdit, setShowEdit] = useState(false)
+  const [editForm, setEditForm] = useState({
+    product_name: "",
+    target_country: "",
+    target_business_types: "",
+    icp_description: "",
+  })
+  const [saving, setSaving] = useState(false)
+
+  const openEdit = () => {
+    if (!vp) return
+    setEditForm({
+      product_name: vp.product_name || "",
+      target_country: vp.target_country || "",
+      target_business_types: vp.target_business_types || "",
+      icp_description: vp.icp_description || "",
+    })
+    setShowEdit(true)
+  }
+
+  const saveProfile = async () => {
+    setSaving(true)
+    try {
+      await api.put("/vp/profile", editForm)
+      setShowEdit(false)
+      load()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -143,8 +176,8 @@ export default function VPDashboardPage() {
                 <input className="w-full bg-[#1a1a2e] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm" value={form.target_audience} onChange={(e) => setForm({ ...form, target_audience: e.target.value })} />
               </div>
               <div className="col-span-2">
-                <label className="block text-sm text-gray-400 mb-1">Target Business Types <span className="text-gray-500">(e.g. restaurants, salons, small businesses — one per line)</span></label>
-                <textarea className="w-full bg-[#1a1a2e] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-20" value={form.target_business_types} onChange={(e) => setForm({ ...form, target_business_types: e.target.value })} placeholder="restaurants&#10;salons&#10;small businesses" />
+                <label className="block text-sm text-gray-400 mb-1">Target Business Types <span className="text-gray-500">(comma or newline separated — e.g. restaurants, salons, small businesses)</span></label>
+                <textarea className="w-full bg-[#1a1a2e] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-20" value={form.target_business_types} onChange={(e) => setForm({ ...form, target_business_types: e.target.value })} placeholder="restaurants, salons, small businesses" />
               </div>
             </div>
             <button onClick={createVP} className="w-full py-3 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors">
@@ -182,9 +215,13 @@ export default function VPDashboardPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">VP Sales Dashboard</h1>
-          <p className="text-sm text-gray-400 mt-1">{vp.name} &middot; {vp.target_country || "No country set"}</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white">VP Sales Dashboard</h1>
+            <p className="text-sm text-gray-400 mt-1">{vp.name} &middot; {vp.target_country || "No country set"} 
+              <button onClick={openEdit} className="ml-2 text-xs text-emerald-500 hover:text-emerald-400 underline">Edit Profile</button>
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={toggleOutreach} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${dashboard?.outreach_active ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"}`}>
@@ -197,6 +234,38 @@ export default function VPDashboardPage() {
           </button>
         </div>
       </div>
+
+      {showEdit && (
+        <div className="p-4 bg-[#1a1a2e] rounded-lg border border-gray-700">
+          <h3 className="text-white font-medium mb-3">Edit VP Profile</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Product Name</label>
+              <input className="w-full bg-[#0d0d1a] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm" value={editForm.product_name} onChange={(e) => setEditForm({...editForm, product_name: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Target Country</label>
+              <input className="w-full bg-[#0d0d1a] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm" value={editForm.target_country} onChange={(e) => setEditForm({...editForm, target_country: e.target.value})} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm text-gray-400 mb-1">Target Business Types <span className="text-gray-500">(comma or newline separated — e.g. restaurants, salons, small businesses)</span></label>
+              <textarea className="w-full bg-[#0d0d1a] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-16" value={editForm.target_business_types} onChange={(e) => setEditForm({...editForm, target_business_types: e.target.value})} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm text-gray-400 mb-1">Ideal Customer Profile</label>
+              <textarea className="w-full bg-[#0d0d1a] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-16" value={editForm.icp_description} onChange={(e) => setEditForm({...editForm, icp_description: e.target.value})} />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={saveProfile} disabled={saving} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button onClick={() => setShowEdit(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-medium">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
