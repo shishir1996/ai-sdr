@@ -47,7 +47,7 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
-async def init_db(on_ready: Optional[list] = None) -> bool:
+async def init_db() -> bool:
     if settings.DATABASE_URL.startswith("sqlite"):
         async with engine.begin() as conn:
             from sqlalchemy import text
@@ -119,16 +119,6 @@ async def init_db(on_ready: Optional[list] = None) -> bool:
                     )
                 except Exception:
                     pass
-
-                # Run seed callbacks inside the same transaction so DDL is visible
-                if on_ready:
-                    session = AsyncSession(bind=conn)
-                    try:
-                        for fn in on_ready:
-                            await fn(session)
-                        await session.flush()
-                    finally:
-                        await session.close()
 
             return True
         except Exception as e:

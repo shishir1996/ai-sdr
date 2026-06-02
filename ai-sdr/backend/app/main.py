@@ -36,10 +36,18 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import logging
+    _log = logging.getLogger(__name__)
     init_supabase()
-    db_ok = await init_db(on_ready=[seed_feature_flags])
+    db_ok = await init_db()
     await init_redis()
     if db_ok:
+        try:
+            async with async_session_factory() as db:
+                await seed_feature_flags(db)
+                await db.commit()
+        except Exception as e:
+            _log.warning("seed_feature_flags failed (non-fatal): %s", e)
         async with async_session_factory() as db:
             result = await db.execute(
                 select(SDRProfile).where(SDRProfile.is_active.is_(True))
