@@ -191,6 +191,53 @@ async def init_db() -> bool:
                         except Exception:
                             pass
 
+            for tname, cols in [
+                ("company_intelligence", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN lead_id VARCHAR", "ADD COLUMN research_result_id VARCHAR",
+                 "ADD COLUMN company_name VARCHAR(255)", "ADD COLUMN website VARCHAR(500)", "ADD COLUMN description TEXT",
+                 "ADD COLUMN services TEXT", "ADD COLUMN industry VARCHAR(255)", "ADD COLUMN sub_industry VARCHAR(255)",
+                 "ADD COLUMN company_size VARCHAR(50)", "ADD COLUMN estimated_revenue VARCHAR(50)", "ADD COLUMN technology_stack JSON",
+                 "ADD COLUMN social_profiles JSON", "ADD COLUMN location VARCHAR(255)", "ADD COLUMN business_model VARCHAR(100)",
+                 "ADD COLUMN founded_year VARCHAR(10)", "ADD COLUMN source_url VARCHAR(500)", "ADD COLUMN confidence FLOAT DEFAULT 0",
+                 "ADD COLUMN raw_data JSON"]),
+                ("decision_makers", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN company_intelligence_id VARCHAR", "ADD COLUMN lead_id VARCHAR",
+                 "ADD COLUMN full_name VARCHAR(255)", "ADD COLUMN title VARCHAR(255)", "ADD COLUMN role_category VARCHAR(100)",
+                 "ADD COLUMN email VARCHAR(255)", "ADD COLUMN phone VARCHAR(50)", "ADD COLUMN linkedin_url VARCHAR(500)",
+                 "ADD COLUMN source_url VARCHAR(500)", "ADD COLUMN source_description TEXT",
+                 "ADD COLUMN confidence FLOAT DEFAULT 0", "ADD COLUMN is_primary_decision_maker BOOLEAN DEFAULT FALSE"]),
+                ("contact_discoveries", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN lead_id VARCHAR", "ADD COLUMN company_intelligence_id VARCHAR",
+                 "ADD COLUMN contact_type VARCHAR(50)", "ADD COLUMN value VARCHAR(500)", "ADD COLUMN source VARCHAR(100)",
+                 "ADD COLUMN confidence FLOAT DEFAULT 0", "ADD COLUMN verified BOOLEAN DEFAULT FALSE", "ADD COLUMN raw_data JSON"]),
+                ("validation_results", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN lead_id VARCHAR", "ADD COLUMN research_result_id VARCHAR",
+                 "ADD COLUMN validation_type VARCHAR(50)", "ADD COLUMN status VARCHAR(50)", "ADD COLUMN score FLOAT DEFAULT 0",
+                 "ADD COLUMN issues JSON", "ADD COLUMN details TEXT"]),
+                ("enrichment_profiles", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN lead_id VARCHAR", "ADD COLUMN company_intelligence_id VARCHAR",
+                 "ADD COLUMN industry VARCHAR(255)", "ADD COLUMN sub_industry VARCHAR(255)", "ADD COLUMN company_size VARCHAR(50)",
+                 "ADD COLUMN location VARCHAR(255)", "ADD COLUMN target_market TEXT", "ADD COLUMN services TEXT",
+                 "ADD COLUMN technology_stack JSON", "ADD COLUMN business_model VARCHAR(100)", "ADD COLUMN funding_stage VARCHAR(100)",
+                 "ADD COLUMN social_links JSON", "ADD COLUMN enrichment_data JSON", "ADD COLUMN confidence FLOAT DEFAULT 0"]),
+                ("buying_signals", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN lead_id VARCHAR", "ADD COLUMN company_intelligence_id VARCHAR",
+                 "ADD COLUMN signal_type VARCHAR(100)", "ADD COLUMN signal_description TEXT", "ADD COLUMN signal_source VARCHAR(200)",
+                 "ADD COLUMN signal_url VARCHAR(500)", "ADD COLUMN signal_date TIMESTAMP", "ADD COLUMN signal_strength FLOAT DEFAULT 0",
+                 "ADD COLUMN intent_score FLOAT DEFAULT 0", "ADD COLUMN raw_data JSON"]),
+                ("lead_scores", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN lead_id VARCHAR UNIQUE",
+                 "ADD COLUMN company_score FLOAT DEFAULT 0", "ADD COLUMN contact_score FLOAT DEFAULT 0",
+                 "ADD COLUMN icp_match_score FLOAT DEFAULT 0", "ADD COLUMN buying_signal_score FLOAT DEFAULT 0",
+                 "ADD COLUMN data_quality_score FLOAT DEFAULT 0", "ADD COLUMN overall_score FLOAT DEFAULT 0",
+                 "ADD COLUMN scoring_breakdown JSON", "ADD COLUMN scoring_version VARCHAR(20) DEFAULT '1.0'"]),
+                ("lead_activities", ["ADD COLUMN org_id VARCHAR", "ADD COLUMN lead_id VARCHAR", "ADD COLUMN agent_type VARCHAR(50)",
+                 "ADD COLUMN activity_type VARCHAR(100)", "ADD COLUMN description TEXT", "ADD COLUMN details JSON"]),
+            ]:
+                for col in cols:
+                    try:
+                        await conn.execute(text("SAVEPOINT mig_intel"))
+                        await conn.execute(text(f"ALTER TABLE {tname} {col}"))
+                        await conn.execute(text("RELEASE SAVEPOINT mig_intel"))
+                    except Exception:
+                        try:
+                            await conn.execute(text("ROLLBACK TO SAVEPOINT mig_intel"))
+                        except Exception:
+                            pass
+
             for col in [
                 "ADD COLUMN outreach_active BOOLEAN DEFAULT FALSE",
                 "ADD COLUMN target_titles TEXT",

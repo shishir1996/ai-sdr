@@ -41,6 +41,7 @@ export default function VPCommandCenter() {
   const [executing, setExecuting] = useState(false)
   const [selectedMission, setSelectedMission] = useState<string | null>(null)
   const [missionDetail, setMissionDetail] = useState<any>(null)
+  const [pipeline, setPipeline] = useState<any>(null)
 
   const load = async () => {
     try {
@@ -54,6 +55,7 @@ export default function VPCommandCenter() {
         setMissions(cmdRes.missions || [])
         setDecisions(cmdRes.recent_decisions || [])
         setSituation(cmdRes.situation)
+        setPipeline(cmdRes.intelligence_pipeline)
       }
     } catch (e) {
       console.error(e)
@@ -342,6 +344,48 @@ export default function VPCommandCenter() {
               </div>
             </div>
           </div>
+
+          {/* Lead Intelligence Pipeline */}
+          {pipeline && (
+            <div className="p-4 bg-[#1a1a2e] rounded-lg border border-gray-800">
+              <h2 className="text-lg font-semibold text-white mb-3">Lead Intelligence Pipeline</h2>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Pipeline Health</span>
+                  <span className={`font-medium ${
+                    pipeline.pipeline_health === "healthy" ? "text-emerald-400" :
+                    pipeline.pipeline_health === "partial" ? "text-amber-400" :
+                    pipeline.pipeline_health === "unscored" ? "text-yellow-400" :
+                    "text-red-400"
+                  }`}>{pipeline.pipeline_health}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Leads in CRM</span>
+                  <span className="text-white">{pipeline.leads_in_crm}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Leads Scored</span>
+                  <span className="text-white">{pipeline.leads_scored}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Avg Lead Score</span>
+                  <span className="text-white">{pipeline.avg_lead_score}/100</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Companies Analyzed</span>
+                  <span className="text-white">{pipeline.companies_analyzed}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Buying Signals</span>
+                  <span className="text-white">{pipeline.buying_signals_detected}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Validations</span>
+                  <span className="text-white">{pipeline.validations_completed}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Recent VP Decisions */}
           <div className="p-4 bg-[#1a1a2e] rounded-lg border border-gray-800">

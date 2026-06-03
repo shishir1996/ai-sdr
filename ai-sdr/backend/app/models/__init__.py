@@ -12,6 +12,10 @@ from app.models.audit import AuditLog, AiUsageLog, Notification
 from app.models.smtp import SMTPConfig
 from app.models.vp_sales import VPSalesProfile, LeadSourceControl, ResearchAgent, ResearchResult, VPActionLog
 from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
+from app.models.lead_intelligence import (
+    CompanyIntelligence, DecisionMaker, ContactDiscovery, ValidationResult,
+    EnrichmentProfile, BuyingSignal, LeadScore, LeadActivity,
+)
 from app.database import Base
 
 __all__ = [
@@ -30,4 +34,6 @@ __all__ = [
     "SMTPConfig",
     "VPSalesProfile", "LeadSourceControl", "ResearchAgent", "ResearchResult", "VPActionLog",
     "Mission", "MissionTask", "AgentMemory", "AgentPerformance",
+    "CompanyIntelligence", "DecisionMaker", "ContactDiscovery", "ValidationResult",
+    "EnrichmentProfile", "BuyingSignal", "LeadScore", "LeadActivity",
 ]
