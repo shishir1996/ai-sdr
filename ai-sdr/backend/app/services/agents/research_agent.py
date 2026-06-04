@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.agents.base_agent import BaseAgent
 from app.services.research.search_service import search_all_enabled
 from app.models.vp_sales import ResearchResult
+from app.services.ai.provider import generate_text
 
 logger = logging.getLogger(__name__)
 
@@ -12,11 +13,14 @@ logger = logging.getLogger(__name__)
 class ResearchAgent(BaseAgent):
     """Research Agent — finds real business owners with contact info.
 
-    Brain: understands ICP, plans search queries, executes searches,
-    scores data quality, validates findings, reports to VP.
+    Brain: uses AI to understand the ICP, determine the best search strategy,
+    generates queries, executes searches, scores data quality,
+    validates findings, saves to CRM, reports to VP.
     """
 
     agent_type = "research"
+    progress_session: Optional[str] = None
+
     system_prompt = (
         "You are a Senior Research Agent with 10+ years in B2B lead research. "
         "You specialize in finding real business owners and decision makers "
@@ -24,18 +28,21 @@ class ResearchAgent(BaseAgent):
     )
 
     async def execute(self, plan: dict) -> dict:
-        await self.log_reasoning("execution_start", "Beginning research")
+        await self.log_reasoning("execution_start", "Planning research strategy")
 
-        steps = plan.get("steps", [{"name": "search", "description": "Find prospects"}])
+        mission_context = plan.get("understanding", "") or plan.get("approach", "")
 
-        # Generate search queries based on the mission objective
-        queries = await self._generate_queries(plan.get("understanding", ""))
-        await self.log_reasoning("queries_generated", f"{len(queries)} queries")
+        # AI decides the best search approach based on mission
+        queries = await self._determine_search_strategy(mission_context)
+        await self.log_reasoning("search_strategy", f"AI decided {len(queries)} search directions")
 
         all_findings = []
         for query in queries[:5]:
             try:
-                results = await search_all_enabled(self.db, self.org_id, query, num_results=10)
+                results = await search_all_enabled(
+                    self.db, self.org_id, query, num_results=10,
+                    progress_session=self.progress_session,
+                )
                 for r in results:
                     scored = self._score_finding(r)
                     all_findings.append(scored)
@@ -43,7 +50,6 @@ class ResearchAgent(BaseAgent):
             except Exception as e:
                 logger.warning("Query failed '%s': %s", query[:40], e)
 
-        # Deduplicate by email/company
         seen = set()
         unique = []
         for f in all_findings:
@@ -68,21 +74,34 @@ class ResearchAgent(BaseAgent):
             "next_action": "convert_to_leads" if unique else "retry",
         }
 
-    async def _generate_queries(self, context: str) -> list[str]:
+    async def _determine_search_strategy(self, context: str) -> list[str]:
+        """AI decides the best search queries based on mission context."""
         prompt = (
-            f"Generate 5 targeted search queries to find real business owners with contact info. "
-            f"Context: {context}\n"
-            f"Examples: 'restaurant owner new york email contact', 'salon owner los angeles phone'\n"
-            f"Return ONLY a JSON array of strings."
+            f"You are a lead research strategist. Given this mission context:\n{context}\n\n"
+            f"Generate 5 targeted search queries to find real business owners and decision makers "
+            f"with emails and phone numbers.\n\n"
+            f"Use strategic variations:\n"
+            f"- Google search queries (e.g., 'plumbers in chicago email')\n"
+            f"- Industry-specific terms\n"
+            f"- Location-based searches\n"
+            f"- Niche directories\n"
+            f"- Phrases that surface contact pages\n\n"
+            f"Return ONLY a JSON array of 5 search query strings."
         )
         try:
             result = await self.think(prompt)
             queries = json.loads(result)
-            if isinstance(queries, list):
-                return queries[:5]
+            if isinstance(queries, list) and len(queries) > 0:
+                return queries[:10]
         except Exception:
-            pass
-        return [f"{context} owner email", f"{context} contact", f"{context} business directory"]
+            logger.info("AI search strategy failed, using fallback queries")
+
+        # Fallback queries
+        return [
+            f"{context} owner email contact",
+            f"{context} business directory",
+            f"{context} companies contact information",
+        ]
 
     def _score_finding(self, result: dict) -> dict:
         score = 0
@@ -98,14 +117,19 @@ class ResearchAgent(BaseAgent):
     async def save_to_crm(self, findings: list[dict]) -> int:
         saved = 0
         for f in findings:
+            company = f.get("company_name") or f.get("title", "")
+            contact_name = f.get("contact_name", "")
+            if not contact_name:
+                contact_name = company
+
             rr = ResearchResult(
                 org_id=self.org_id,
                 source=f.get("_source", "web_research"),
                 source_url=f.get("link", ""),
                 title=f.get("title", ""),
                 snippet=f.get("snippet", ""),
-                company_name=f.get("company_name", ""),
-                contact_name=f.get("contact_name", ""),
+                company_name=company,
+                contact_name=contact_name,
                 contact_title=f.get("contact_title", ""),
                 contact_email=f.get("contact_email", ""),
                 contact_phone=f.get("contact_phone", ""),
@@ -117,7 +141,7 @@ class ResearchAgent(BaseAgent):
                 state=f.get("state", ""),
                 country=f.get("country", ""),
                 postal_code=f.get("postal_code", ""),
-                raw_data=f,
+                raw_data={**f, "search_rank": f.get("search_rank", 0)},
                 status="new",
             )
             self.db.add(rr)

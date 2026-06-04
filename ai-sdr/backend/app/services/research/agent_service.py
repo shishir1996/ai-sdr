@@ -38,7 +38,7 @@ async def create_research_agent(
     return agent
 
 
-async def execute_research(db: AsyncSession, agent_id: str) -> int:
+async def execute_research(db: AsyncSession, agent_id: str, progress_session: Optional[str] = None) -> int:
     result = await db.execute(select(ResearchAgent).where(ResearchAgent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -62,7 +62,8 @@ async def execute_research(db: AsyncSession, agent_id: str) -> int:
     total = 0
     for query in queries[:5]:
         try:
-            results = await search_all_enabled(db, agent.org_id, query, num_results=10)
+            results = await search_all_enabled(db, agent.org_id, query, num_results=10,
+                                                progress_session=progress_session)
             for r in results:
                 research_result = ResearchResult(
                     org_id=agent.org_id,

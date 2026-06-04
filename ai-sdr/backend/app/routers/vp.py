@@ -52,6 +52,9 @@ class MissionCreateRequest(BaseModel):
     kpi_target: Optional[str] = None
 
 
+class DecideRequest(BaseModel):
+    progress_session: Optional[str] = None
+
 class MissionTaskFeedbackRequest(BaseModel):
     task_id: str
     vp_feedback: Optional[str] = None
@@ -187,6 +190,7 @@ async def vp_decisions(
 
 @router.post("/decide")
 async def vp_decide(
+    req: Optional[DecideRequest] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -197,7 +201,8 @@ async def vp_decide(
     if not vp:
         raise HTTPException(status_code=404, detail="Create VP profile first")
 
-    result = await decide_and_execute(db, user.org_id, vp)
+    result = await decide_and_execute(db, user.org_id, vp,
+                                       progress_session=req.progress_session if req else None)
     return result
 
 
@@ -266,10 +271,11 @@ async def create_research_agent_endpoint(
 @router.post("/agents/{agent_id}/run")
 async def run_research_agent(
     agent_id: str,
+    progress_session: Optional[str] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    leads_found = await execute_research(db, agent_id)
+    leads_found = await execute_research(db, agent_id, progress_session=progress_session)
     return {"leads_found": leads_found, "message": f"Research completed. {leads_found} leads discovered."}
 
 
@@ -427,11 +433,16 @@ async def create_mission_endpoint(
                                     vp_reasoning="Manually created mission")
 
     return {
-        "id": mission.id,
-        "name": mission.name,
-        "tasks_created": len(tasks),
-        "message": f"Mission '{mission.name}' created with {len(tasks)} tasks",
+        "missions": missions,
+        "recent_decisions": decisions[:10],
+        "situation": situation,
     }
+
+
+@router.get("/search-progress/{session_id}")
+async def search_progress(session_id: str):
+    progress = get_search_progress(session_id)
+    return {"progress": progress}
 
 
 @router.get("/missions/{mission_id}")

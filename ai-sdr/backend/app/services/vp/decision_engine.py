@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -14,6 +15,7 @@ from app.services.mission.mission_service import (
 )
 from app.services.agents.research_agent import ResearchAgent
 from app.services.agents.outreach_agent import OutreachAgent
+from app.services.ai.provider import generate_text
 
 logger = logging.getLogger(__name__)
 
@@ -74,17 +76,56 @@ async def log_vp_action(db: AsyncSession, org_id: str, vp_id: str, action_type: 
 
 
 async def _vp_decide(db: AsyncSession, org_id: str, vp: VPSalesProfile, situation: dict) -> dict:
-    """VP thinks about the situation and decides next action."""
+    """VP thinks about the situation using AI and decides next action. Falls back to rules if AI fails."""
 
-    # Missions in progress — wait
+    try:
+        prompt = (
+            f"You are the VP of Sales for a company selling: {vp.product_name or 'Unknown Product'}.\n"
+            f"Product description: {vp.product_description or 'N/A'}\n"
+            f"Service: {vp.service_description or 'N/A'}\n"
+            f"Target audience/ICP: {vp.icp_description or vp.target_audience or 'N/A'}\n"
+            f"Target country: {vp.target_country or 'N/A'}\n"
+            f"Target business types: {vp.target_business_types or 'N/A'}\n"
+            f"Target titles: {vp.target_titles or 'N/A'}\n"
+            f"Business goals: {vp.business_goals or 'N/A'}\n"
+            f"Sales objectives: {vp.sales_objectives or 'N/A'}\n\n"
+            f"Current situation:\n"
+            f"- CRM leads: {situation['leads']}\n"
+            f"- Research findings not yet in CRM: {situation['unconverted_research']}\n"
+            f"- Research agents: {situation['research_agents']}\n"
+            f"- SDRs deployed: {situation['sdrs']} (active: {situation['active_sdrs']})\n"
+            f"- Active missions: {situation['active_missions']}\n"
+            f"- Enabled data sources: {', '.join(situation['sources']) or 'none'}\n"
+            f"- Outreach active: {vp.outreach_active}\n\n"
+            f"Decide the single best next action. Available actions:\n"
+            f"1. 'research' — launch a search to find real business owners with contact info\n"
+            f"2. 'convert' — move unconverted research findings into CRM leads\n"
+            f"3. 'deploy_sdr' — create and deploy an SDR (sales development rep)\n"
+            f"4. 'campaign' — start an outreach campaign via existing SDR\n"
+            f"5. 'wait' — hold, let current missions complete\n"
+            f"6. 'setup' — VP profile needs more configuration\n"
+            f"7. 'monitor' — everything is good, keep watching\n\n"
+            f"Return ONLY valid JSON with: action, reasoning, and if action is 'research' include:\n"
+            f"  mission: {{ name, objective (detailed what to find and where), kpi }}\n"
+            f"If action is 'deploy_sdr' include: sdr_name\n"
+            f"If action is 'campaign' include: mission: {{ name, objective, kpi }}\n"
+            f"Be specific about what to research, where, and why."
+        )
+        vp_prompt = f"You are the VP of Sales. Think carefully about pipeline status and revenue goals."
+        result = await generate_text(vp_prompt, prompt, max_tokens=1024, temperature=0.3)
+        decision = json.loads(result)
+        if decision.get("action") in ("research", "convert", "deploy_sdr", "campaign", "wait", "setup", "monitor"):
+            return decision
+    except Exception:
+        logger.info("AI VP decision failed, using rule fallback", exc_info=True)
+
+    # ---- Rule-based fallback ----
     if situation["active_missions"] > 0:
         return {"action": "wait", "reasoning": f"{situation['active_missions']} mission(s) running."}
 
-    # No product or country — can't proceed
     if not vp.product_name and not vp.target_country:
         return {"action": "setup", "reasoning": "Need product and target country in VP profile."}
 
-    # Need more leads — launch research
     if situation["leads"] < 10:
         biz = vp.target_business_types or vp.icp_description or "businesses"
         country = vp.target_country or "global"
@@ -98,11 +139,9 @@ async def _vp_decide(db: AsyncSession, org_id: str, vp: VPSalesProfile, situatio
             },
         }
 
-    # Unconverted research — move to CRM
     if situation["unconverted_research"] > 0:
         return {"action": "convert", "reasoning": f"{situation['unconverted_research']} results ready for CRM."}
 
-    # No SDR — deploy one
     if situation["sdrs"] == 0:
         return {
             "action": "deploy_sdr",
@@ -110,7 +149,6 @@ async def _vp_decide(db: AsyncSession, org_id: str, vp: VPSalesProfile, situatio
             "sdr_name": f"SDR - {vp.product_name or 'Sales'}",
         }
 
-    # Has SDR, has leads — create campaign
     if vp.outreach_active and situation["active_sdrs"] > 0:
         return {
             "action": "campaign",
@@ -125,7 +163,9 @@ async def _vp_decide(db: AsyncSession, org_id: str, vp: VPSalesProfile, situatio
     return {"action": "monitor", "reasoning": "All systems running. Watching pipeline."}
 
 
-async def _execute_research_mission(db: AsyncSession, org_id: str, vp_id: str, mission_data: dict) -> list[str]:
+async def _execute_research_mission(db: AsyncSession, org_id: str, vp_id: str,
+                                     mission_data: dict,
+                                     progress_session: Optional[str] = None) -> list[str]:
     steps = []
     mission = await create_mission(db, org_id, vp_id, mission_data["name"], mission_data["objective"], mission_data.get("kpi"))
     steps.append(f"Mission: {mission.name}")
@@ -137,6 +177,7 @@ async def _execute_research_mission(db: AsyncSession, org_id: str, vp_id: str, m
         try:
             agent = ResearchAgent(db, org_id)
             agent.agent_id = task.id
+            agent.progress_session = progress_session
             report = await agent.run(task)
 
             findings = report.get("findings", [])
@@ -241,7 +282,8 @@ async def _create_outreach_mission(db: AsyncSession, org_id: str, vp_id: str, mi
     return steps
 
 
-async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
+async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile,
+                             progress_session: Optional[str] = None) -> dict:
     situation = await assess_situation(db, org_id)
     decision = await _vp_decide(db, org_id, vp, situation)
 
@@ -251,7 +293,8 @@ async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile) 
     action = decision["action"]
 
     if action == "research":
-        steps = await _execute_research_mission(db, org_id, vp.id, decision["mission"])
+        steps = await _execute_research_mission(db, org_id, vp.id, decision["mission"],
+                                                 progress_session=progress_session)
     elif action == "convert":
         result = await db.execute(
             select(ResearchResult).where(

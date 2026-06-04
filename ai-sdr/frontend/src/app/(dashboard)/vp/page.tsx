@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { api } from "@/lib/api-client"
 
 export default function VPPage() {
@@ -14,6 +14,9 @@ export default function VPPage() {
   const [vpError, setVpError] = useState("")
   const [editForm, setEditForm] = useState({ product_name: "", target_country: "", target_business_types: "", icp_description: "" })
   const [showEdit, setShowEdit] = useState(false)
+  const [progress, setProgress] = useState<any[]>([])
+  const [progressSession, setProgressSession] = useState<string>("")
+  const progressRef = useRef<any>(null)
   const [form, setForm] = useState({
     name: "VP Sales AI", product_name: "", product_description: "", service_description: "",
     business_goals: "", icp_description: "", target_country: "", target_audience: "",
@@ -40,6 +43,17 @@ export default function VPPage() {
 
   useEffect(() => { load() }, [])
 
+  useEffect(() => {
+    if (!progressSession) return
+    const interval = setInterval(async () => {
+      try {
+        const p = await api.get<any>(`/vp/search-progress/${progressSession}`)
+        if (p.progress) setProgress(p.progress)
+      } catch {}
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [progressSession])
+
   const createVP = async () => {
     setVpError("")
     try {
@@ -51,11 +65,14 @@ export default function VPPage() {
 
   const runDecision = async () => {
     setExecuting(true)
+    setProgress([])
+    const sid = Math.random().toString(36).slice(2)
+    setProgressSession(sid)
     try {
-      await api.post("/vp/decide")
+      await api.post("/vp/decide", { progress_session: sid })
       load()
     } catch (e) { console.error(e) }
-    finally { setExecuting(false) }
+    finally { setExecuting(false); setProgressSession("") }
   }
 
   const toggleOutreach = async () => {
@@ -251,6 +268,28 @@ export default function VPPage() {
               {(!dash?.sources || dash.sources.length === 0) && <span className="text-xs text-gray-500">No sources</span>}
             </div>
           </div>
+
+          {/* Live Search Progress */}
+          {progress.length > 0 && (
+            <div className="bg-[#1a1a2e] rounded-lg border border-emerald-800/50 p-4">
+              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                Search Progress
+              </h2>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {progress.map((p: any, i: number) => (
+                  <div key={i} className="flex items-center gap-3 text-sm py-1.5 border-b border-gray-800/50 last:border-0">
+                    <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 rounded text-[10px] font-mono">{p.source.replace(/_/g, " ")}</span>
+                    <span className="text-gray-400 flex-1 truncate">{p.query}</span>
+                    <span className="text-white font-mono text-xs">{p.found} leads</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-xs text-gray-500 text-right">
+                Total: {progress.reduce((s: number, p: any) => s + p.found, 0)} leads found
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right column — Decisions & SDRs */}
