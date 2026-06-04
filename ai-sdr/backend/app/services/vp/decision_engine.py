@@ -82,45 +82,48 @@ async def _vp_decide(db: AsyncSession, org_id: str, vp: VPSalesProfile, situatio
     try:
         prompt = (
             f"You are the VP of Sales for a company selling: {vp.product_name or 'Unknown Product'}.\n"
-            f"Product description: {vp.product_description or 'N/A'}\n"
-            f"Service: {vp.service_description or 'N/A'}\n"
-            f"Target audience/ICP: {vp.icp_description or vp.target_audience or 'N/A'}\n"
-            f"Target country: {vp.target_country or 'N/A'}\n"
-            f"Target business types: {vp.target_business_types or 'N/A'}\n"
-            f"Target titles: {vp.target_titles or 'N/A'}\n"
-            f"Business goals: {vp.business_goals or 'N/A'}\n"
-            f"Sales objectives: {vp.sales_objectives or 'N/A'}\n\n"
-            f"Current situation:\n"
-            f"- CRM leads: {situation['leads']}\n"
-            f"- Research findings not yet in CRM: {situation['unconverted_research']}\n"
-            f"- Research agents: {situation['research_agents']}\n"
+            f"Target: {vp.target_country or 'N/A'} | ICP: {vp.icp_description or vp.target_audience or 'N/A'}\n"
+            f"Business types: {vp.target_business_types or 'N/A'}\n"
+            f"Goals: {vp.business_goals or vp.sales_objectives or 'Generate pipeline'}\n\n"
+            f"PIPELINE STATUS:\n"
+            f"- Leads in CRM: {situation['leads']}\n"
+            f"- Research findings (not yet CRM): {situation['unconverted_research']}\n"
             f"- SDRs deployed: {situation['sdrs']} (active: {situation['active_sdrs']})\n"
             f"- Active missions: {situation['active_missions']}\n"
-            f"- Enabled data sources: {', '.join(situation['sources']) or 'none'}\n"
             f"- Outreach active: {vp.outreach_active}\n\n"
-            f"Decide the single best next action. Available actions:\n"
-            f"1. 'research' — launch a search to find real business owners with contact info\n"
-            f"2. 'convert' — move unconverted research findings into CRM leads\n"
-            f"3. 'deploy_sdr' — create and deploy an SDR (sales development rep)\n"
-            f"4. 'campaign' — start an outreach campaign via existing SDR\n"
-            f"5. 'wait' — hold, let current missions complete\n"
-            f"6. 'setup' — VP profile needs more configuration\n"
-            f"7. 'monitor' — everything is good, keep watching\n\n"
-            f"Return ONLY valid JSON with: action, reasoning, and if action is 'research' include:\n"
-            f"  mission: {{ name, objective (detailed what to find and where), kpi }}\n"
-            f"If action is 'deploy_sdr' include: sdr_name\n"
-            f"If action is 'campaign' include: mission: {{ name, objective, kpi }}\n"
-            f"Be specific about what to research, where, and why."
+            f"YOUR JOB is to grow the pipeline. Pick ONE action:\n"
+            f"- 'research': if you need MORE leads (launches search to find business owners)\n"
+            f"- 'convert': if research findings exist but not yet in CRM\n"
+            f"- 'deploy_sdr': if you have leads but no SDR to reach out\n"
+            f"- 'campaign': if SDR exists but no active campaign\n"
+            f"- 'setup': if VP profile is incomplete\n"
+            f"Use 'wait' or 'monitor' ONLY if missions are already running or pipeline is full.\n\n"
+            f"Return ONLY valid JSON. Example: {{\"action\":\"research\",\"reasoning\":\"Only 0 leads\",\"mission\":{{\"name\":\"Find...\",\"objective\":\"...\",\"kpi\":\"...\"}}}}\n"
+            f"If research: include mission with name, objective (detailed what/where to find), kpi.\n"
+            f"If deploy_sdr: include sdr_name.\n"
+            f"If campaign: include mission with name, objective, kpi."
         )
-        vp_prompt = f"You are the VP of Sales. Think carefully about pipeline status and revenue goals."
-        result = await generate_text(vp_prompt, prompt, max_tokens=1024, temperature=0.3)
+        result = await generate_text("", prompt, max_tokens=1024, temperature=0.1)
         decision = json.loads(result)
         if decision.get("action") in ("research", "convert", "deploy_sdr", "campaign", "wait", "setup", "monitor"):
+            # Safety net: if AI says monitor but clearly needs work, override
+            if decision["action"] in ("wait", "monitor"):
+                if situation["active_missions"] == 0:
+                    if situation["leads"] < 5:
+                        return await _vp_decide_fallback(vp, situation)
+                    if situation["unconverted_research"] > 0:
+                        return {"action": "convert", "reasoning": "Converting research findings to CRM."}
+                    if situation["sdrs"] == 0:
+                        return {"action": "deploy_sdr", "reasoning": "Leads ready, need SDR.", "sdr_name": f"SDR - {vp.product_name or 'Sales'}"}
             return decision
     except Exception:
-        logger.info("AI VP decision failed, using rule fallback", exc_info=True)
+        logger.info("AI VP decision failed, using rule fallback")
 
-    # ---- Rule-based fallback ----
+    return await _vp_decide_fallback(vp, situation)
+
+
+async def _vp_decide_fallback(vp: VPSalesProfile, situation: dict) -> dict:
+    """Rule-based fallback when AI is unavailable."""
     if situation["active_missions"] > 0:
         return {"action": "wait", "reasoning": f"{situation['active_missions']} mission(s) running."}
 
