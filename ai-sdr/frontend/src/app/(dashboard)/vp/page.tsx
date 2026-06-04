@@ -17,6 +17,8 @@ export default function VPPage() {
   const [progress, setProgress] = useState<any[]>([])
   const [progressSession, setProgressSession] = useState<string>("")
   const progressRef = useRef<any>(null)
+  const [resetting, setResetting] = useState(false)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [form, setForm] = useState({
     name: "VP Sales AI", product_name: "", product_description: "", service_description: "",
     business_goals: "", icp_description: "", target_country: "", target_audience: "",
@@ -62,9 +64,6 @@ export default function VPPage() {
       load()
     } catch (e: any) { setVpError(e.message) }
   }
-
-  const [resetting, setResetting] = useState(false)
-  const [showResetConfirm, setShowResetConfirm] = useState(false)
 
   const runDecision = async () => {
     setExecuting(true)
