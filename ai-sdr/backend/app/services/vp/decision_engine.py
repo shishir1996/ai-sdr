@@ -77,53 +77,63 @@ async def log_vp_action(db: AsyncSession, org_id: str, vp_id: str, action_type: 
 
 
 async def _vp_decide(db: AsyncSession, org_id: str, vp: VPSalesProfile, situation: dict) -> dict:
-    """VP thinks about the situation using AI and decides next action. Falls back to rules if AI fails."""
+    """VP decides next action using rules (for correctness) + AI (for enrichment)."""
 
-    try:
-        prompt = (
-            f"You are the VP of Sales for a company selling: {vp.product_name or 'Unknown Product'}.\n"
-            f"Target: {vp.target_country or 'N/A'} | ICP: {vp.icp_description or vp.target_audience or 'N/A'}\n"
-            f"Business types: {vp.target_business_types or 'N/A'}\n"
-            f"Goals: {vp.business_goals or vp.sales_objectives or 'Generate pipeline'}\n\n"
-            f"PIPELINE STATUS:\n"
-            f"- Leads in CRM: {situation['leads']}\n"
-            f"- Research findings (not yet CRM): {situation['unconverted_research']}\n"
-            f"- SDRs deployed: {situation['sdrs']} (active: {situation['active_sdrs']})\n"
-            f"- Active missions: {situation['active_missions']}\n"
-            f"- Outreach active: {vp.outreach_active}\n\n"
-            f"YOUR JOB is to grow the pipeline. Pick ONE action:\n"
-            f"- 'research': if you need MORE leads (launches search to find business owners)\n"
-            f"- 'convert': if research findings exist but not yet in CRM\n"
-            f"- 'deploy_sdr': if you have leads but no SDR to reach out\n"
-            f"- 'campaign': if SDR exists but no active campaign\n"
-            f"- 'setup': if VP profile is incomplete\n"
-            f"Use 'wait' or 'monitor' ONLY if missions are already running or pipeline is full.\n\n"
-            f"Return ONLY valid JSON. Example: {{\"action\":\"research\",\"reasoning\":\"Only 0 leads\",\"mission\":{{\"name\":\"Find...\",\"objective\":\"...\",\"kpi\":\"...\"}}}}\n"
-            f"If research: include mission with name, objective (detailed what/where to find), kpi.\n"
-            f"If deploy_sdr: include sdr_name.\n"
-            f"If campaign: include mission with name, objective, kpi."
+    decision = await _vp_decide_rules(vp, situation)
+
+    # Try to enrich decision with AI (better mission objectives, reasoning)
+    if decision["action"] in ("research", "campaign", "deploy_sdr"):
+        try:
+            enriched = await _vp_enrich_decision(vp, situation, decision)
+            if enriched.get("action") == decision["action"]:
+                decision = enriched
+        except Exception:
+            pass
+
+    return decision
+
+
+async def _vp_enrich_decision(vp: VPSalesProfile, situation: dict, base_decision: dict) -> dict:
+    """Use AI to enrich a rule-based decision with better reasoning and mission details."""
+    action = base_decision["action"]
+    prompt = (
+        f"You are the VP of Sales. Company sells: {vp.product_name or 'Unknown Product'}. "
+        f"Target: {vp.target_country or 'global'}. "
+        f"ICP: {vp.icp_description or vp.target_audience or 'business owners'}. "
+        f"Business types: {vp.target_business_types or 'various'}.\n"
+        f"Business goals: {vp.business_goals or 'Generate revenue'}\n\n"
+        f"The decision has been made to: {action}.\n"
+        f"Current pipeline: {situation['leads']} leads, {situation['sdrs']} SDRs.\n\n"
+    )
+    if action == "research":
+        prompt += (
+            f"Generate a focused research mission. Return ONLY JSON with:\n"
+            f"- reasoning: why this research matters\n"
+            f"- mission: {{ name, objective: specific what to find and where, kpi }}\n"
         )
-        result = await generate_text("", prompt, max_tokens=1024, temperature=0.1)
-        decision = json.loads(result)
-        if decision.get("action") in ("research", "convert", "deploy_sdr", "campaign", "wait", "setup", "monitor"):
-            # Safety net: if AI says monitor but clearly needs work, override
-            if decision["action"] in ("wait", "monitor"):
-                if situation["active_missions"] == 0:
-                    if situation["leads"] < 5:
-                        return await _vp_decide_fallback(vp, situation)
-                    if situation["unconverted_research"] > 0:
-                        return {"action": "convert", "reasoning": "Converting research findings to CRM."}
-                    if situation["sdrs"] == 0:
-                        return {"action": "deploy_sdr", "reasoning": "Leads ready, need SDR.", "sdr_name": f"SDR - {vp.product_name or 'Sales'}"}
-            return decision
-    except Exception:
-        logger.info("AI VP decision failed, using rule fallback")
+    elif action == "deploy_sdr":
+        prompt += (
+            f"Return ONLY JSON with:\n"
+            f"- reasoning: why deploy now\n"
+            f"- sdr_name: a professional SDR name for this product\n"
+        )
+    elif action == "campaign":
+        prompt += (
+            f"Return ONLY JSON with:\n"
+            f"- reasoning: why campaign now\n"
+            f"- mission: {{ name, objective, kpi }}\n"
+        )
+    else:
+        return base_decision
 
-    return await _vp_decide_fallback(vp, situation)
+    result = await generate_text("", prompt, max_tokens=1024, temperature=0.1)
+    enriched = json.loads(result)
+    enriched["action"] = action
+    return enriched
 
 
-async def _vp_decide_fallback(vp: VPSalesProfile, situation: dict) -> dict:
-    """Rule-based fallback when AI is unavailable."""
+async def _vp_decide_rules(vp: VPSalesProfile, situation: dict) -> dict:
+    """Rule-based decision engine. Always picks the right action."""
     if situation["active_missions"] > 0:
         return {"action": "wait", "reasoning": f"{situation['active_missions']} mission(s) running."}
 
