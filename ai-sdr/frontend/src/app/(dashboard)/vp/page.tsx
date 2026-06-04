@@ -63,6 +63,9 @@ export default function VPPage() {
     } catch (e: any) { setVpError(e.message) }
   }
 
+  const [resetting, setResetting] = useState(false)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+
   const runDecision = async () => {
     setExecuting(true)
     setProgress([])
@@ -73,6 +76,16 @@ export default function VPPage() {
       load()
     } catch (e) { console.error(e) }
     finally { setExecuting(false); setProgressSession("") }
+  }
+
+  const resetAll = async () => {
+    setResetting(true)
+    try {
+      await api.post("/vp/reset", {})
+      setShowResetConfirm(false)
+      load()
+    } catch (e) { console.error(e) }
+    finally { setResetting(false) }
   }
 
   const toggleOutreach = async () => {
@@ -167,7 +180,24 @@ export default function VPPage() {
           <button onClick={runDecision} disabled={executing} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
             {executing ? "VP Thinking..." : "Run VP Decision"}
           </button>
+          <button onClick={() => setShowResetConfirm(true)} disabled={resetting} className="px-3 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium">
+            {resetting ? "Resetting..." : "Reset All Data"}
+          </button>
         </div>
+
+      {/* Reset Confirmation Modal */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-[#1a1a2e] p-6 rounded-lg border border-red-800 max-w-sm">
+            <h3 className="text-white font-semibold mb-2">Reset All Data?</h3>
+            <p className="text-gray-400 text-sm mb-4">This deletes all leads, SDRs, missions, campaigns, and research. This cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowResetConfirm(false)} className="px-4 py-2 bg-gray-700 text-white rounded-lg text-sm">Cancel</button>
+              <button onClick={resetAll} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm">Yes, Reset Everything</button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
 
       {/* Edit Profile Modal */}
