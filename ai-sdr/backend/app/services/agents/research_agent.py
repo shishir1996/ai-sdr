@@ -96,11 +96,31 @@ class ResearchAgent(BaseAgent):
         except Exception:
             logger.info("AI search strategy failed, using fallback queries")
 
-        # Fallback queries
+        biz = ""
+        country = "USA"
+        import re
+        lines = context.split('\n')
+        for line in lines:
+            if 'find' in line.lower() and 'owner' in line.lower():
+                parts = line.replace('Find real', '').replace('find real', '').replace('Find', '').replace('find', '').strip()
+                m = re.match(r'(.+?)\s+owners?\s+in\s+([A-Za-z\s]+)', parts)
+                if m:
+                    biz = m.group(1).strip().rstrip(',').strip()
+                    country = m.group(2).strip().rstrip(',').strip()
+                break
+        if not biz:
+            biz = context[:60].replace('Find real', '').replace('find', '').strip()
+
+        biz_terms = [b.strip() for b in biz.replace(',', ' ').split() if b.strip()]
+        if not biz_terms:
+            biz_terms = ['business']
+
         return [
-            f"{context} owner email contact",
-            f"{context} business directory",
-            f"{context} companies contact information",
+            f"{' '.join(biz_terms[:3])} in {country} owner email contact",
+            f"{' '.join(biz_terms[:3])} {country} business directory",
+            f"{' '.join(biz_terms[:3])} {country} company contact information",
+            f"{' '.join(biz_terms[:3])} near me phone email",
+            f"{' '.join(biz_terms[:2])} {country} contact page",
         ]
 
     def _score_finding(self, result: dict) -> dict:
