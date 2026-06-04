@@ -1,116 +1,95 @@
 import logging
-import json
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.agents.base_agent import BaseAgent
-from app.services.ai.provider import generate_text
-from app.models.vp_sales import VPActionLog
 
 logger = logging.getLogger(__name__)
 
 
 class OutreachAgent(BaseAgent):
-    """Intelligent outreach/sales agent.
+    """SDR Agent — executes outreach campaigns.
 
-    Creates messaging, handles objections, plans followups.
+    Brain: Plans outreach sequence, creates messaging,
+    handles objections, plans followups, reports to VP.
     """
 
-    agent_type = "outreach"
+    agent_type = "sdr"
+    system_prompt = (
+        "You are a Senior SDR with 8+ years in B2B outbound sales. "
+        "You excel at creating personalized outreach that gets replies. "
+        "You plan multi-channel sequences and adapt based on response."
+    )
 
-    async def execute_plan(self, plan: dict) -> dict:
-        await self._log_reasoning("execution_start", "Beginning outreach execution")
+    async def execute(self, plan: dict) -> dict:
+        await self.log_reasoning("execution_start", "Planning outreach campaign")
 
-        steps = plan.get("steps", [{"name": "create_messaging", "description": "Create outreach messages"}])
-        all_messages = []
+        steps = plan.get("steps", [{"name": "plan", "description": "Plan outreach"}])
+        campaign_plan = None
+        messages = []
         recommendations = []
 
         for step in steps:
-            step_name = step.get("name", "message")
-            await self._log_reasoning("step", f"Executing step: {step_name}")
-
-            step_result = await self._execute_step(step)
-            all_messages.extend(step_result.get("messages", []))
-            recommendations.extend(step_result.get("recommendations", []))
+            name = step.get("name", "").lower()
+            if "plan" in name or "campaign" in name:
+                campaign_plan = self._build_campaign_plan(step.get("description", ""))
+            elif "message" in name or "email" in name:
+                messages = self._generate_messages(step.get("description", ""))
+            elif "objection" in name:
+                recommendations.append("Train on objection handling: budget, timing, authority")
+            elif "follow" in name:
+                recommendations.append("Follow up day 3 and day 7 if no reply")
 
         return {
-            "work_completed": f"Created {len(all_messages)} message variants",
-            "findings": all_messages,
-            "confidence": 0.7 if all_messages else 0.3,
-            "risks": ["No AI API key for personalized messages"] if not all_messages else [],
-            "recommendations": recommendations or ["Review and approve messages before sending"],
-            "next_action": "review_messages",
+            "work_completed": "Campaign planned with multi-step sequence",
+            "findings": {
+                "campaign": campaign_plan or self._default_campaign(),
+                "messages": messages or self._default_messages(),
+            },
+            "confidence": 0.8 if campaign_plan else 0.5,
+            "risks": ["No AI API key — using template messages"] if not messages else [],
+            "recommendations": recommendations or ["Launch campaign when VP approves"],
+            "next_action": "launch_campaign",
         }
 
-    async def _execute_step(self, step: dict) -> dict:
-        step_name = step.get("name", "message").lower()
-        description = step.get("description", "")
+    def _build_campaign_plan(self, context: str) -> dict:
+        return {
+            "name": f"Outreach Campaign",
+            "steps": [
+                {"day": 0, "channel": "email", "action": "Initial outreach"},
+                {"day": 3, "channel": "email", "action": "Follow-up with value prop"},
+                {"day": 7, "channel": "call", "action": "Phone call follow-up"},
+                {"day": 14, "channel": "email", "action": "Final break-up email"},
+            ],
+            "strategy": "Multi-touch, multi-channel sequence with increasing urgency",
+        }
 
-        if "message" in step_name or "email" in step_name or "sequence" in step_name:
-            messages = self._generate_messages(description)
-            return {"messages": messages, "recommendations": ["Personalize with lead details before sending"]}
-
-        if "objection" in step_name:
-            return self._generate_objection_handling(description)
-
-        if "followup" in step_name:
-            return self._generate_followup_plan(description)
-
-        if "campaign" in step_name:
-            return self._generate_campaign_plan(description)
-
-        return {"messages": [], "recommendations": ["Define outreach objective clearly"]}
+    def _default_campaign(self) -> dict:
+        return {
+            "name": "Standard 3-Step Campaign",
+            "steps": [
+                {"step": 1, "channel": "email", "delay_days": 0},
+                {"step": 2, "channel": "email", "delay_days": 3},
+                {"step": 3, "channel": "call", "delay_days": 7},
+            ],
+        }
 
     def _generate_messages(self, context: str) -> list[dict]:
         return [
             {
                 "type": "email",
-                "purpose": "initial_outreach",
-                "subject": f"Quick question about {context[:30]}",
-                "body_preview": f"Hi {{first_name}}, I noticed your work at {{company_name}}...",
-                "suggested_channel": "email",
+                "subject": "Quick question",
+                "body": "Hi {{first_name}}, I noticed {{company_name}}...",
             },
             {
                 "type": "email",
-                "purpose": "follow_up_day_3",
                 "subject": "Following up",
-                "body_preview": "Hi {{first_name}}, just following up on my previous message...",
-                "suggested_channel": "email",
-            },
-            {
-                "type": "call",
-                "purpose": "call_script_day_7",
-                "script_preview": "Hi {{first_name}}, this is {{sdr_name}}...",
-                "suggested_channel": "call",
+                "body": "Hi {{first_name}}, following up on my previous email...",
             },
         ]
 
-    def _generate_objection_handling(self, context: str) -> dict:
-        return {
-            "objections": [
-                {"objection": "Not interested", "response": "I understand. Would you be open to a brief 5-min chat?"},
-                {"objection": "No budget", "response": "What budget range would work for you?"},
-                {"objection": "Happy with current solution", "response": "What do you like about your current setup?"},
-            ],
-            "recommendations": ["Train SDR on objection responses before campaign launch"],
-        }
-
-    def _generate_followup_plan(self, context: str) -> dict:
-        return {
-            "plan": [
-                {"day": 1, "action": "Initial email", "channel": "email"},
-                {"day": 3, "action": "Follow-up email with value prop", "channel": "email"},
-                {"day": 7, "action": "Call with personalized script", "channel": "call"},
-                {"day": 14, "action": "Final break-up email", "channel": "email"},
-            ],
-            "recommendations": ["Adjust timing based on lead engagement"],
-        }
-
-    def _generate_campaign_plan(self, context: str) -> dict:
-        return {
-            "campaign_steps": [
-                {"step": 1, "channel": "email", "delay": 0, "purpose": "Introduction"},
-                {"step": 2, "channel": "email", "delay": 3, "purpose": "Value proposition"},
-                {"step": 3, "channel": "call", "delay": 7, "purpose": "Qualification call"},
-            ],
-            "recommendations": ["A/B test subject lines", "Track open and reply rates"],
-        }
+    def _default_messages(self) -> list[dict]:
+        return [
+            {"step": 1, "channel": "email", "template": "Hi {{first_name}}, I wanted to reach out about..."},
+            {"step": 2, "channel": "email", "template": "Hi {{first_name}}, following up on my message from last week..."},
+            {"step": 3, "channel": "call", "script": "Hi {{first_name}}, this is {{sdr_name}}..."},
+        ]

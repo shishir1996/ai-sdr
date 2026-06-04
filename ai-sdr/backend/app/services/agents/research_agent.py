@@ -2,147 +2,104 @@ import logging
 import json
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from app.services.agents.base_agent import BaseAgent
 from app.services.research.search_service import search_all_enabled
-from app.services.research.agent_service import convert_to_lead
-from app.models.vp_sales import ResearchAgent, ResearchResult, VPActionLog
-from app.models.vp_orchestration import MissionTask
-from app.services.ai.provider import generate_text
+from app.models.vp_sales import ResearchResult
 
 logger = logging.getLogger(__name__)
 
 
-class ResearchAgentIntelligence(BaseAgent):
-    """Intelligent research agent with independent reasoning.
+class ResearchAgent(BaseAgent):
+    """Research Agent — finds real business owners with contact info.
 
-    Understands research objectives, decides search paths,
-    validates sources, and scores data quality.
+    Brain: understands ICP, plans search queries, executes searches,
+    scores data quality, validates findings, reports to VP.
     """
 
     agent_type = "research"
+    system_prompt = (
+        "You are a Senior Research Agent with 10+ years in B2B lead research. "
+        "You specialize in finding real business owners and decision makers "
+        "with accurate contact information from public sources."
+    )
 
-    def __init__(self, db: AsyncSession, org_id: str, agent_id: Optional[str] = None):
-        super().__init__(db, org_id, agent_id)
-        self.queries_used: list[str] = []
-        self.results_collected: list[dict] = []
+    async def execute(self, plan: dict) -> dict:
+        await self.log_reasoning("execution_start", "Beginning research")
 
-    async def execute_plan(self, plan: dict) -> dict:
-        await self._log_reasoning("execution_start", "Beginning research execution")
+        steps = plan.get("steps", [{"name": "search", "description": "Find prospects"}])
 
-        steps = plan.get("steps", [{"name": "search", "description": "Search for prospects"}])
+        # Generate search queries based on the mission objective
+        queries = await self._generate_queries(plan.get("understanding", ""))
+        await self.log_reasoning("queries_generated", f"{len(queries)} queries")
+
         all_findings = []
-        risks = []
-        recommendations = []
+        for query in queries[:5]:
+            try:
+                results = await search_all_enabled(self.db, self.org_id, query, num_results=10)
+                for r in results:
+                    scored = self._score_finding(r)
+                    all_findings.append(scored)
+                await self.log_reasoning("query_executed", f"'{query[:50]}...' → {len(results)} results")
+            except Exception as e:
+                logger.warning("Query failed '%s': %s", query[:40], e)
 
-        for step in steps:
-            step_name = step.get("name", "research")
-            await self._log_reasoning("step", f"Executing step: {step_name}")
+        # Deduplicate by email/company
+        seen = set()
+        unique = []
+        for f in all_findings:
+            key = f.get("contact_email", "") or f.get("company_name", "") or f.get("link", "")
+            if key and key not in seen:
+                seen.add(key)
+                unique.append(f)
 
-            step_result = await self._execute_step(step)
-            step_findings = step_result.get("findings", [])
-            all_findings.extend(step_findings)
-            self.results_collected.extend(step_findings)
-            risks.extend(step_result.get("risks", []))
-            recommendations.extend(step_result.get("recommendations", []))
+        emails = len([f for f in unique if f.get("contact_email")])
+        phones = len([f for f in unique if f.get("contact_phone")])
+        quality = min(1.0, (emails + phones) / max(len(unique), 1) * 0.5 + 0.3)
 
-        sources_validated = len([f for f in all_findings if f.get("source_url")])
-        emails_found = len([f for f in all_findings if f.get("contact_email")])
-        phones_found = len([f for f in all_findings if f.get("contact_phone")])
-        quality_score = min(1.0, (emails_found + phones_found) / max(len(all_findings), 1) * 0.5 + 0.3)
-
-        await self._log_reasoning("quality_assessment",
-                                  f"Sources: {sources_validated}, Emails: {emails_found}, Phones: {phones_found}, "
-                                  f"Quality: {quality_score:.2f}")
+        await self.log_reasoning("quality_assessment",
+                                 f"{len(unique)} unique leads, {emails} emails, {phones} phones")
 
         return {
-            "work_completed": f"Searched {len(self.queries_used)} queries across enabled sources",
-            "findings": all_findings,
-            "confidence": quality_score,
-            "risks": list(set(risks)),
-            "recommendations": list(set(recommendations)),
-            "next_action": "convert_to_leads" if all_findings else "refine_queries",
+            "work_completed": f"Searched {len(queries)} queries, found {len(unique)} leads",
+            "findings": unique[:30],
+            "confidence": quality,
+            "risks": ["Some emails may be generic"] if not emails else [],
+            "recommendations": ["Convert high-confidence leads to CRM"] if unique else ["Broaden search queries"],
+            "next_action": "convert_to_leads" if unique else "retry",
         }
 
-    async def _execute_step(self, step: dict) -> dict:
-        step_name = step.get("name", "search").lower()
-        description = step.get("description", "")
-
-        searches_performed = []
-        findings = []
-        risks = []
-        recommendations = []
-
-        if "search" in step_name or "query" in step_name:
-            queries = await self._generate_queries_from_step(description)
-            self.queries_used.extend(queries)
-
-            for query in queries[:3]:
-                try:
-                    results = await search_all_enabled(self.db, self.org_id, query, num_results=10)
-                    for r in results:
-                        enriched = self._score_finding(r)
-                        findings.append(enriched)
-                    searches_performed.append({"query": query, "results": len(results)})
-                    await self._log_reasoning("query_executed",
-                                              f"Query '{query[:60]}...' → {len(results)} results")
-                except Exception as e:
-                    logger.warning("Research query failed '%s': %s", query, e)
-                    risks.append(f"Query failed: {query[:50]}")
-
-        elif "analyze" in step_name or "validate" in step_name:
-            pass
-
-        else:
-            findings, risks = [], []
-
-        if len(findings) < 3:
-            recommendations.append("Broaden search queries or enable more sources")
-
-        return {"findings": findings, "risks": risks, "recommendations": recommendations}
-
-    async def _generate_queries_from_step(self, description: str) -> list[str]:
+    async def _generate_queries(self, context: str) -> list[str]:
+        prompt = (
+            f"Generate 5 targeted search queries to find real business owners with contact info. "
+            f"Context: {context}\n"
+            f"Examples: 'restaurant owner new york email contact', 'salon owner los angeles phone'\n"
+            f"Return ONLY a JSON array of strings."
+        )
         try:
-            prompt = (
-                f"Generate 3 search queries to find business owners/prospects. "
-                f"Context: {description}\n"
-                f"Return ONLY a JSON array of strings."
-            )
-            result = await generate_text("", prompt)
-            return json.loads(result.strip())[:3]
+            result = await self.think(prompt)
+            queries = json.loads(result)
+            if isinstance(queries, list):
+                return queries[:5]
         except Exception:
-            return [f"{description} contact email", f"{description} owners phone", f"{description} business directory"]
+            pass
+        return [f"{context} owner email", f"{context} contact", f"{context} business directory"]
 
     def _score_finding(self, result: dict) -> dict:
         score = 0
-        signals = []
-
-        if result.get("contact_email"):
-            score += 0.3
-            signals.append("email_found")
-        if result.get("contact_phone"):
-            score += 0.3
-            signals.append("phone_found")
-        if result.get("contact_name"):
-            score += 0.2
-            signals.append("name_found")
-        if result.get("company_name"):
-            score += 0.1
-            signals.append("company_found")
-        if result.get("source_url"):
-            score += 0.1
-            signals.append("source_validated")
-
-        result["quality_score"] = round(min(1.0, score), 2)
-        result["quality_signals"] = signals
+        if result.get("contact_email"): score += 30
+        if result.get("contact_phone"): score += 25
+        if result.get("contact_name"): score += 20
+        if result.get("company_name"): score += 15
+        if result.get("source_url"): score += 10
+        result["quality"] = min(100, score)
+        result["_agent"] = "research"
         return result
 
-    async def save_findings(self, vp_id: Optional[str]) -> int:
+    async def save_to_crm(self, findings: list[dict]) -> int:
         saved = 0
-        for f in self.results_collected:
+        for f in findings:
             rr = ResearchResult(
                 org_id=self.org_id,
-                research_agent_id=self.agent_id,
                 source=f.get("_source", "web_research"),
                 source_url=f.get("link", ""),
                 title=f.get("title", ""),
@@ -166,20 +123,4 @@ class ResearchAgentIntelligence(BaseAgent):
             self.db.add(rr)
             saved += 1
         await self.db.flush()
-
-        if vp_id:
-            vp_log = VPActionLog(
-                org_id=self.org_id,
-                vp_id=vp_id,
-                action_type="research_findings_saved",
-                reasoning=f"Research agent saved {saved} findings from {len(self.queries_used)} queries",
-                details={"agent_id": self.agent_id, "findings_saved": saved, "queries": self.queries_used},
-            )
-            self.db.add(vp_log)
-            await self.db.flush()
-
-        self.results_collected = []
         return saved
-
-
-

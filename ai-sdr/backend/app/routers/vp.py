@@ -10,7 +10,7 @@ from app.models.vp_orchestration import Mission, MissionTask, AgentPerformance
 from app.models.user import User
 from app.utils.auth import get_current_user
 from app.services.vp.decision_engine import (
-    decide_and_execute, get_vp_dashboard, get_vp_decisions, log_vp_action, assess_lead_situation,
+    decide_and_execute, get_vp_dashboard, get_vp_decisions, log_vp_action, assess_situation,
 )
 from app.services.research.agent_service import create_research_agent, execute_research, get_agent_results
 from app.services.mission.mission_service import (
@@ -329,7 +329,7 @@ async def vp_situation(
     vp = result.scalar_one_or_none()
     if not vp:
         return {"error": "no_vp"}
-    situation = await assess_lead_situation(db, user.org_id, vp)
+    situation = await assess_situation(db, user.org_id)
     return situation
 
 
@@ -489,8 +489,6 @@ async def vp_command_center(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models.lead_intelligence import LeadScore, CompanyIntelligence, BuyingSignal, ValidationResult
-
     result = await db.execute(
         select(VPSalesProfile).where(VPSalesProfile.org_id == user.org_id)
     )
@@ -501,34 +499,7 @@ async def vp_command_center(
     dashboard = await get_vp_dashboard(db, user.org_id, vp.id)
     missions = await get_vp_missions(db, user.org_id)
     decisions = await get_vp_decisions(db, user.org_id, vp.id)
-    situation = await assess_lead_situation(db, user.org_id, vp)
-
-    scored = await db.scalar(
-        select(func.count(LeadScore.id)).where(LeadScore.org_id == user.org_id)
-    ) or 0
-    avg_score = await db.scalar(
-        select(func.avg(LeadScore.overall_score)).where(LeadScore.org_id == user.org_id)
-    ) or 0
-
-    companies_intelligence = await db.scalar(
-        select(func.count(CompanyIntelligence.id)).where(CompanyIntelligence.org_id == user.org_id)
-    ) or 0
-
-    signals_detected = await db.scalar(
-        select(func.count(BuyingSignal.id)).where(BuyingSignal.org_id == user.org_id)
-    ) or 0
-
-    validations = await db.scalar(
-        select(func.count(ValidationResult.id)).where(ValidationResult.org_id == user.org_id)
-    ) or 0
-
-    pipeline_health = "healthy"
-    if situation["total_leads"] == 0:
-        pipeline_health = "empty"
-    elif scored == 0 and situation["total_leads"] > 0:
-        pipeline_health = "unscored"
-    elif scored < situation["total_leads"]:
-        pipeline_health = "partial"
+    situation = await assess_situation(db, user.org_id)
 
     return {
         "vp": {
@@ -544,13 +515,4 @@ async def vp_command_center(
         "missions": missions,
         "recent_decisions": decisions[:10],
         "situation": situation,
-        "intelligence_pipeline": {
-            "leads_in_crm": situation["total_leads"],
-            "leads_scored": scored,
-            "avg_lead_score": round(float(avg_score), 1),
-            "companies_analyzed": companies_intelligence,
-            "buying_signals_detected": signals_detected,
-            "validations_completed": validations,
-            "pipeline_health": pipeline_health,
-        },
     }

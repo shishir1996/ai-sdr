@@ -1,40 +1,30 @@
 import logging
-import json
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models.vp_sales import VPSalesProfile, ResearchAgent, ResearchResult, VPActionLog
-from app.models.vp_orchestration import Mission, MissionTask, AgentPerformance
+from app.models.vp_orchestration import Mission, MissionTask
 from app.models.agent import SDRProfile
 from app.models.lead import Lead
-from app.services.ai.provider import generate_text
 from app.services.lead_sources.service import get_enabled_sources
-from app.services.research.agent_service import create_research_agent, execute_research, convert_to_lead
+from app.services.research.agent_service import convert_to_lead
 from app.services.mission.mission_service import (
     create_mission, decompose_mission, evaluate_mission_reports,
-    assign_task_to_agent, collect_task_report, get_vp_missions,
+    get_vp_missions,
 )
-from app.services.agents.research_agent import ResearchAgentIntelligence
+from app.services.agents.research_agent import ResearchAgent
 from app.services.agents.outreach_agent import OutreachAgent
-from app.services.agents.company_intelligence_agent import CompanyIntelligenceAgent
-from app.services.agents.decision_maker_agent import DecisionMakerAgent
-from app.services.agents.contact_discovery_agent import ContactDiscoveryAgent
-from app.services.agents.validation_agent import ValidationAgent
-from app.services.agents.enrichment_agent import EnrichmentAgent
-from app.services.agents.buying_signal_agent import BuyingSignalAgent
-from app.services.agents.lead_scoring_agent import LeadScoringAgent
 
 logger = logging.getLogger(__name__)
 
 
 async def get_vp_decisions(db: AsyncSession, org_id: str, vp_id: str) -> list[dict]:
     result = await db.execute(
-        select(VPActionLog)
-        .where(VPActionLog.org_id == org_id, VPActionLog.vp_id == vp_id)
-        .order_by(VPActionLog.created_at.desc())
-        .limit(20)
+        select(VPActionLog).where(
+            VPActionLog.org_id == org_id,
+            VPActionLog.vp_id == vp_id,
+        ).order_by(VPActionLog.created_at.desc()).limit(20)
     )
-    logs = result.scalars().all()
     return [
         {
             "id": log.id,
@@ -43,464 +33,145 @@ async def get_vp_decisions(db: AsyncSession, org_id: str, vp_id: str) -> list[di
             "details": log.details,
             "created_at": log.created_at.isoformat() if log.created_at else None,
         }
-        for log in logs
+        for log in result.scalars().all()
     ]
 
 
-async def assess_lead_situation(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
-    lead_count = await db.scalar(
-        select(func.count(Lead.id)).where(Lead.org_id == org_id)
-    )
-    research_count = await db.scalar(
-        select(func.count(ResearchResult.id)).where(
-            ResearchResult.org_id == org_id,
-            ResearchResult.converted_to_lead == False,
-        )
-    )
-    agent_count = await db.scalar(
-        select(func.count(ResearchAgent.id)).where(ResearchAgent.org_id == org_id)
-    )
-    sdr_count = await db.scalar(
-        select(func.count(SDRProfile.id)).where(
-            SDRProfile.org_id == org_id,
-            SDRProfile.deleted_at.is_(None),
-        )
-    )
-    active_sdrs = await db.scalar(
-        select(func.count(SDRProfile.id)).where(
-            SDRProfile.org_id == org_id,
-            SDRProfile.is_active == True,
-            SDRProfile.deleted_at.is_(None),
-        )
-    )
-    enabled = await get_enabled_sources(db, org_id)
-
-    missions = await db.execute(
-        select(func.count(Mission.id)).where(
-            Mission.org_id == org_id,
-            Mission.status.in_(["in_progress", "draft"]),
-        )
-    )
-    active_missions = missions.scalar() or 0
-
+async def assess_situation(db: AsyncSession, org_id: str) -> dict:
     return {
-        "total_leads": lead_count or 0,
-        "unconverted_research": research_count or 0,
-        "total_agents": agent_count or 0,
-        "total_sdrs": sdr_count or 0,
-        "active_sdrs": active_sdrs or 0,
-        "active_missions": active_missions,
-        "enabled_sources": enabled,
-        "has_product_info": bool(vp.product_name or vp.product_description or vp.service_description),
-        "has_target_country": bool(vp.target_country),
-        "has_icp": bool(vp.icp_description),
-        "has_business_types": bool(vp.target_business_types),
-        "outreach_active": bool(vp.outreach_active),
+        "leads": await db.scalar(select(func.count(Lead.id)).where(Lead.org_id == org_id)) or 0,
+        "unconverted_research": await db.scalar(
+            select(func.count(ResearchResult.id)).where(
+                ResearchResult.org_id == org_id, ResearchResult.converted_to_lead == False,
+            )
+        ) or 0,
+        "sdrs": await db.scalar(
+            select(func.count(SDRProfile.id)).where(
+                SDRProfile.org_id == org_id, SDRProfile.deleted_at.is_(None),
+            )
+        ) or 0,
+        "active_sdrs": await db.scalar(
+            select(func.count(SDRProfile.id)).where(
+                SDRProfile.org_id == org_id, SDRProfile.is_active == True,
+                SDRProfile.deleted_at.is_(None),
+            )
+        ) or 0,
+        "active_missions": await db.scalar(
+            select(func.count(Mission.id)).where(
+                Mission.org_id == org_id, Mission.status.in_(["in_progress", "draft"]),
+            )
+        ) or 0,
+        "research_agents": await db.scalar(
+            select(func.count(ResearchAgent.id)).where(ResearchAgent.org_id == org_id)
+        ) or 0,
+        "sources": await get_enabled_sources(db, org_id),
     }
 
 
-async def log_vp_action(
-    db: AsyncSession,
-    org_id: str,
-    vp_id: str,
-    action_type: str,
-    reasoning: str,
-    details: Optional[dict] = None,
-):
-    log = VPActionLog(
-        org_id=org_id,
-        vp_id=vp_id,
-        action_type=action_type,
-        reasoning=reasoning,
-        details=details or {},
-    )
-    db.add(log)
+async def log_vp_action(db: AsyncSession, org_id: str, vp_id: str, action_type: str, reasoning: str, details: Optional[dict] = None):
+    db.add(VPActionLog(org_id=org_id, vp_id=vp_id, action_type=action_type, reasoning=reasoning, details=details or {}))
     await db.flush()
 
 
-def _auto_intelligence_missions(biz_types: str, country: str, product: str,
-                                 pipeline_phase: str = "full") -> list[dict]:
-    missions = []
+async def _vp_decide(db: AsyncSession, org_id: str, vp: VPSalesProfile, situation: dict) -> dict:
+    """VP thinks about the situation and decides next action."""
 
-    if pipeline_phase in ("full", "research"):
-        missions.append({
-            "name": f"Research - {country} {biz_types}",
-            "objective": f"Find {biz_types} companies in {country}. Collect company names, websites, locations, industries.",
-            "kpi_target": "Discover at least 50 target companies",
-            "agent_type": "research",
-        })
-
-    if pipeline_phase in ("full", "intelligence", "research"):
-        missions.append({
-            "name": f"Company Intelligence - {country} {biz_types}",
-            "objective": f"Analyze discovered companies for {product}. Collect descriptions, services, size, tech stack.",
-            "kpi_target": "Generate intelligence reports for at least 20 companies",
-            "agent_type": "company_intelligence",
-        })
-
-        missions.append({
-            "name": f"Decision Makers - {country} {biz_types}",
-            "objective": f"Find founders, CEOs, owners, VPs at target companies in {country}.",
-            "kpi_target": "Identify at least 30 decision makers",
-            "agent_type": "decision_maker",
-        })
-
-        missions.append({
-            "name": f"Contact Discovery - {country} {biz_types}",
-            "objective": f"Find email addresses and phone numbers for identified decision makers in {country}.",
-            "kpi_target": "Discover at least 50 verified contacts",
-            "agent_type": "contact_discovery",
-        })
-
-    if pipeline_phase in ("full", "intelligence", "validation"):
-        missions.append({
-            "name": "Data Validation",
-            "objective": "Validate all discovered data: websites, emails, phones, company legitimacy. Flag duplicates and fakes.",
-            "kpi_target": "Validate 100% of collected data points",
-            "agent_type": "validation",
-        })
-
-        missions.append({
-            "name": "Lead Enrichment",
-            "objective": "Enrich all leads with business intelligence: industry, size, tech stack, business model.",
-            "kpi_target": "Enrich at least 80% of leads",
-            "agent_type": "enrichment",
-        })
-
-    if pipeline_phase in ("full", "signals", "intelligence"):
-        missions.append({
-            "name": "Buying Signals",
-            "objective": "Detect buying signals: hiring, funding, expansion, partnerships at target companies.",
-            "kpi_target": "Detect signals for at least 30% of leads",
-            "agent_type": "buying_signal",
-        })
-
-    if pipeline_phase in ("full", "scoring", "intelligence"):
-        missions.append({
-            "name": "Lead Scoring",
-            "objective": "Score all leads: company score, contact score, ICP match, buying signals, data quality.",
-            "kpi_target": "Score 100% of CRM leads",
-            "agent_type": "lead_scoring",
-        })
-
-    return missions
-
-
-async def _vp_strategic_plan(db: AsyncSession, situation: dict, vp: VPSalesProfile) -> dict:
+    # Missions in progress — wait
     if situation["active_missions"] > 0:
+        return {"action": "wait", "reasoning": f"{situation['active_missions']} mission(s) running."}
+
+    # No product or country — can't proceed
+    if not vp.product_name and not vp.target_country:
+        return {"action": "setup", "reasoning": "Need product and target country in VP profile."}
+
+    # Need more leads — launch research
+    if situation["leads"] < 10:
+        biz = vp.target_business_types or vp.icp_description or "businesses"
+        country = vp.target_country or "global"
         return {
-            "action": "continue_missions",
-            "reasoning": f"{situation['active_missions']} mission(s) in progress. Monitoring completion.",
-        }
-
-    if not situation["has_product_info"] or not situation["has_target_country"]:
-        return {
-            "action": "request_setup",
-            "reasoning": "VP profile incomplete. Need product info and target country to plan strategy.",
-        }
-
-    biz_types = vp.target_business_types or vp.icp_description or "businesses"
-    country = vp.target_country or "global"
-    product = vp.product_name or "our services"
-
-    if situation["total_leads"] < 10:
-        return {
-            "action": "launch_lead_intelligence_pipeline",
-            "reasoning": (f"Pipeline empty ({situation['total_leads']} leads). "
-                          f"Launching full autonomous intelligence pipeline: research → company intelligence "
-                          f"→ decision makers → contacts → validation → enrichment → signals → scoring → SDR."),
-            "missions": _auto_intelligence_missions(biz_types, country, product, "full"),
-        }
-
-    from app.models.lead_intelligence import LeadScore
-    scored_count = await db.scalar(
-        select(func.count(LeadScore.id))
-        .select_from(LeadScore)
-        .join(Lead, LeadScore.lead_id == Lead.id)
-        .where(Lead.org_id == situation.get("_org_id", ""))
-    ) if situation.get("_org_id") else 0
-    unscores = situation["total_leads"] - (scored_count or 0)
-
-    if unscores > 0:
-        return {
-            "action": "run_intelligence_pipeline",
-            "reasoning": f"{situation['total_leads']} leads, {unscores} unscored. Running intelligence pipeline.",
-            "missions": _auto_intelligence_missions(biz_types, country, product, "intelligence"),
-        }
-
-    if situation["active_sdrs"] == 0:
-        return {
-            "action": "deploy_sdr",
-            "reasoning": f"{situation['total_leads']} leads scored and ready. Deploying SDR.",
-            "sdr_name": f"SDR - {product}",
-        }
-
-    if situation["outreach_active"]:
-        return {
-            "action": "create_campaign_mission",
-            "reasoning": "SDR deployed and outreach active. Creating campaign for lead engagement.",
+            "action": "research",
+            "reasoning": f"Only {situation['leads']} leads. Launching research to find {biz} in {country}.",
             "mission": {
-                "name": f"Campaign - {product}",
-                "objective": f"Execute outreach campaign for {product} targeting {country} {biz_types}. Generate meetings.",
-                "kpi_target": "At least 5 meetings from campaign",
+                "name": f"Find {country} {biz}",
+                "objective": f"Find real {biz} owners in {country} with email and phone. Target: {vp.product_name or ''} ICP.",
+                "kpi": "At least 20 leads with verified contact info",
             },
         }
 
-    return {
-        "action": "monitor",
-        "reasoning": "All systems operational. VP monitoring pipeline health and agent performance.",
-    }
+    # Unconverted research — move to CRM
+    if situation["unconverted_research"] > 0:
+        return {"action": "convert", "reasoning": f"{situation['unconverted_research']} results ready for CRM."}
+
+    # No SDR — deploy one
+    if situation["sdrs"] == 0:
+        return {
+            "action": "deploy_sdr",
+            "reasoning": f"{situation['leads']} leads ready. Deploying SDR for outreach.",
+            "sdr_name": f"SDR - {vp.product_name or 'Sales'}",
+        }
+
+    # Has SDR, has leads — create campaign
+    if vp.outreach_active and situation["active_sdrs"] > 0:
+        return {
+            "action": "campaign",
+            "reasoning": "SDR deployed. Creating outreach campaign.",
+            "mission": {
+                "name": f"Campaign - {vp.product_name or 'Outreach'}",
+                "objective": f"Execute outreach for {vp.product_name or 'services'} in {vp.target_country or 'global'}.",
+                "kpi": "Generate meetings from campaign",
+            },
+        }
+
+    return {"action": "monitor", "reasoning": "All systems running. Watching pipeline."}
 
 
-async def _execute_vp_plan(db: AsyncSession, org_id: str, vp: VPSalesProfile, plan: dict) -> list[str]:
+async def _execute_research_mission(db: AsyncSession, org_id: str, vp_id: str, mission_data: dict) -> list[str]:
     steps = []
-    action = plan["action"]
+    mission = await create_mission(db, org_id, vp_id, mission_data["name"], mission_data["objective"], mission_data.get("kpi"))
+    steps.append(f"Mission: {mission.name}")
 
-    if action == "create_mission":
-        mission_data = plan.get("mission", {})
-        mission = await create_mission(
-            db=db, org_id=org_id, vp_id=vp.id,
-            name=mission_data.get("name", "Lead Generation"),
-            objective=mission_data.get("objective", "Find prospects"),
-            kpi_target=mission_data.get("kpi_target"),
-        )
-        await log_vp_action(db, org_id, vp.id, "mission_planned",
-                            reasoning=plan["reasoning"],
-                            details={"mission_id": mission.id, "mission_name": mission.name})
-        steps.append(f"Mission '{mission.name}' created ({mission.id[:8]})")
-
-        tasks = await decompose_mission(db, org_id, vp.id, mission,
-                                        vp_reasoning=plan["reasoning"])
-        steps.append(f"Mission decomposed into {len(tasks)} agent tasks")
-
-        task_results = await _execute_agent_tasks(db, org_id, vp.id, tasks)
-        steps.extend(task_results)
-
-        evaluation = await evaluate_mission_reports(db, org_id, vp.id, mission)
-        steps.append(f"VP evaluation: {evaluation['verdict'].upper()} "
-                      f"({evaluation['completed']}/{evaluation['total_tasks']} tasks, "
-                      f"confidence {evaluation['avg_confidence']})")
-
-    elif action == "convert_leads":
-        converted = await _convert_all_research(db, org_id, vp.id)
-        steps.append(f"VP ordered conversion: {converted} research findings → CRM leads")
-
-    elif action == "deploy_sdr":
-        sdr_name = plan.get("sdr_name", "SDR - Auto")
-        sdr_steps = await _launch_sdr(db, org_id, vp, sdr_name)
-        steps.extend(sdr_steps)
-
-    elif action == "create_campaign_mission":
-        mission_data = plan.get("mission", {})
-        mission = await create_mission(
-            db=db, org_id=org_id, vp_id=vp.id,
-            name=mission_data.get("name", "Campaign"),
-            objective=mission_data.get("objective", "Execute outreach"),
-            kpi_target=mission_data.get("kpi_target"),
-        )
-        steps.append(f"Campaign mission '{mission.name}' created")
-
-        tasks = await decompose_mission(db, org_id, vp.id, mission)
-        steps.append(f"Campaign tasks created: {len(tasks)}")
-
-        agent_tasks = await _execute_agent_tasks(db, org_id, vp.id, tasks)
-        steps.extend(agent_tasks)
-
-        evaluation = await evaluate_mission_reports(db, org_id, vp.id, mission)
-        steps.append(f"Campaign evaluation: {evaluation['verdict']}")
-
-    elif action in ("launch_lead_intelligence_pipeline", "run_intelligence_pipeline"):
-        mission_defs = plan.get("missions", [])
-        for md in mission_defs:
-            try:
-                mission = await create_mission(
-                    db=db, org_id=org_id, vp_id=vp.id,
-                    name=md.get("name", "Intelligence Mission"),
-                    objective=md.get("objective", "Collect intelligence"),
-                    kpi_target=md.get("kpi_target"),
-                )
-                steps.append(f"Pipeline: '{mission.name}' created")
-
-                tasks = await decompose_mission(db, org_id, vp.id, mission,
-                                                vp_reasoning=plan["reasoning"])
-                steps.append(f"  → {len(tasks)} task(s) assigned")
-
-                task_results = await _execute_agent_tasks(db, org_id, vp.id, tasks)
-                steps.extend(f"  {s}" for s in task_results)
-
-                evaluation = await evaluate_mission_reports(db, org_id, vp.id, mission)
-                steps.append(f"  VP: {evaluation['verdict']} "
-                              f"({evaluation['completed']}/{evaluation['total_tasks']})")
-            except Exception as e:
-                logger.warning("Pipeline mission failed: %s", e)
-                steps.append(f"  Pipeline mission failed: {str(e)[:80]}")
-
-    elif action == "continue_missions":
-        steps.append("VP monitoring active missions")
-
-    else:
-        steps.append("VP monitoring — no action needed")
-
-    return steps
-
-
-async def _execute_agent_tasks(
-    db: AsyncSession, org_id: str, vp_id: str, tasks: list[MissionTask],
-) -> list[str]:
-    steps = []
+    tasks = await decompose_mission(db, org_id, vp_id, mission)
+    steps.append(f"→ {len(tasks)} task(s) created")
 
     for task in tasks:
-        agent_type = task.agent_type
         try:
-            if agent_type == "research":
-                agent = ResearchAgentIntelligence(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
+            agent = ResearchAgent(db, org_id)
+            agent.agent_id = task.id
+            report = await agent.run(task)
 
-                findings = report.get("findings", [])
-                saved = 0
-                if findings:
-                    for f in findings:
-                        rr = ResearchResult(
-                            org_id=org_id,
-                            research_agent_id=None,
-                            source=f.get("_source", "web_research"),
-                            source_url=f.get("link", ""),
-                            title=f.get("title", ""),
-                            snippet=f.get("snippet", ""),
-                            company_name=f.get("company_name", ""),
-                            contact_name=f.get("contact_name", ""),
-                            contact_title=f.get("contact_title", ""),
-                            contact_email=f.get("contact_email", ""),
-                            contact_phone=f.get("contact_phone", ""),
-                            website=f.get("website", ""),
-                            industry=f.get("industry", ""),
-                            business_type=f.get("business_type", ""),
-                            location=f.get("location", ""),
-                            city=f.get("city", ""),
-                            state=f.get("state", ""),
-                            country=f.get("country", ""),
-                            postal_code=f.get("postal_code", ""),
-                            raw_data=f,
-                            status="new",
-                        )
-                        db.add(rr)
-                        saved += 1
-                    await db.flush()
+            findings = report.get("findings", [])
+            if findings:
+                saved = await agent.save_to_crm(findings)
+                steps.append(f"Research Agent found {saved} leads")
 
-                steps.append(f"Research agent found {saved} prospects "
-                              f"(confidence: {report.get('confidence', 0):.2f})")
-
-                if saved:
-                    converted = await _convert_all_research(db, org_id, vp_id)
-                    if converted:
-                        steps.append(f"{converted} leads added to CRM")
-
-            elif agent_type == "outreach":
-                agent = OutreachAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                steps.append(f"Outreach agent: {report.get('work_completed', 'planned')}")
-
-            elif agent_type == "company_intelligence":
-                agent = CompanyIntelligenceAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                steps.append(f"Company intelligence: {report.get('work_completed', 'planned')} "
-                              f"(confidence: {report.get('confidence', 0):.2f})")
-
-            elif agent_type == "decision_maker":
-                agent = DecisionMakerAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                dms = len(report.get("findings", []))
-                steps.append(f"Decision maker agent identified {dms} decision makers "
-                              f"(confidence: {report.get('confidence', 0):.2f})")
-
-            elif agent_type == "contact_discovery":
-                agent = ContactDiscoveryAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                steps.append(f"Contact discovery: {report.get('work_completed', 'planned')} "
-                              f"(confidence: {report.get('confidence', 0):.2f})")
-
-            elif agent_type == "validation":
-                agent = ValidationAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                steps.append(f"Validation: {report.get('work_completed', 'planned')} "
-                              f"(confidence: {report.get('confidence', 0):.2f})")
-
-            elif agent_type == "enrichment":
-                agent = EnrichmentAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                steps.append(f"Enrichment: {report.get('work_completed', 'planned')} "
-                              f"(confidence: {report.get('confidence', 0):.2f})")
-
-            elif agent_type == "buying_signal":
-                agent = BuyingSignalAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                signals = len(report.get("findings", []))
-                steps.append(f"Buying signal agent detected {signals} signals "
-                              f"(intent: {report.get('confidence', 0):.2f})")
-
-            elif agent_type == "lead_scoring":
-                agent = LeadScoringAgent(db, org_id)
-                agent.agent_id = task.id
-                report = await agent.run(task)
-                await assign_task_to_agent(db, task, agent.agent_id)
-                steps.append(f"Lead scoring: {report.get('work_completed', 'planned')} "
-                              f"(confidence: {report.get('confidence', 0):.2f})")
-
+                converted = 0
+                results = await db.execute(
+                    select(ResearchResult).where(
+                        ResearchResult.org_id == org_id,
+                        ResearchResult.converted_to_lead == False,
+                    )
+                )
+                for rr in results.scalars().all():
+                    if await convert_to_lead(db, org_id, rr.id):
+                        converted += 1
+                if converted:
+                    steps.append(f"→ {converted} converted to CRM leads")
             else:
-                await assign_task_to_agent(db, task, f"pending_{agent_type}")
-                steps.append(f"{agent_type} agent task created — waiting for execution")
-                task.status = "pending"
-                await db.flush()
-
+                steps.append("Research Agent found 0 leads — try broader queries")
         except Exception as e:
-            logger.warning("Agent task failed (%s): %s", agent_type, e)
-            task.status = "failed"
-            task.report = {"error": str(e)}
-            await db.flush()
-            steps.append(f"{agent_type} agent task failed: {str(e)[:80]}")
+            logger.warning("Research task failed: %s", e)
+            steps.append(f"Research failed: {str(e)[:60]}")
 
+    evaluation = await evaluate_mission_reports(db, org_id, vp_id, mission)
+    steps.append(f"VP review: {evaluation['verdict']} ({evaluation['completed']}/{evaluation['total_tasks']})")
     return steps
 
 
-async def _convert_all_research(db: AsyncSession, org_id: str, vp_id: str) -> int:
-    result = await db.execute(
-        select(ResearchResult).where(
-            ResearchResult.org_id == org_id,
-            ResearchResult.converted_to_lead == False,
-        )
-    )
-    converted = 0
-    for row in result.scalars().all():
-        lead_id = await convert_to_lead(db, org_id, row.id)
-        if lead_id:
-            converted += 1
-    if converted:
-        await log_vp_action(db, org_id, vp_id, "leads_converted",
-                            f"Converted {converted} research results to CRM leads", {"count": converted})
-    return converted
-
-
-async def _launch_sdr(db: AsyncSession, org_id: str, vp: VPSalesProfile, sdr_name: str) -> list[str]:
+async def _deploy_sdr(db: AsyncSession, org_id: str, vp: VPSalesProfile, name: str) -> list[str]:
     steps = []
     try:
         sdr = SDRProfile(
-            org_id=org_id, name=sdr_name, sell_type="product",
+            org_id=org_id, name=name, sell_type="product",
             product_name=vp.product_name or "",
             product_description=vp.product_description or "",
             service_description=vp.service_description or "",
@@ -510,169 +181,138 @@ async def _launch_sdr(db: AsyncSession, org_id: str, vp: VPSalesProfile, sdr_nam
         )
         db.add(sdr)
         await db.flush()
-        sdr_id = sdr.id
 
-        assigned = await _assign_leads_to_sdr(db, org_id, sdr_id)
-        await log_vp_action(db, org_id, vp.id, "sdr_created",
-                            f"SDR '{sdr_name}' created with {assigned} leads",
-                            {"sdr_id": sdr_id, "leads_assigned": assigned})
-        steps.append(f"SDR '{sdr_name}' deployed with {assigned} leads")
+        # Assign all leads to SDR
+        from app.models.agent import LeadState
+        leads = await db.execute(select(Lead).where(Lead.org_id == org_id))
+        assigned = 0
+        for lead in leads.scalars().all():
+            existing = await db.execute(
+                select(LeadState).where(
+                    LeadState.org_id == org_id,
+                    LeadState.lead_id == lead.id,
+                    LeadState.sdr_profile_id == sdr.id,
+                )
+            )
+            if not existing.scalar_one_or_none():
+                db.add(LeadState(org_id=org_id, lead_id=lead.id, sdr_profile_id=sdr.id, state="new", priority=50))
+                assigned += 1
+        if assigned:
+            await db.flush()
 
-        campaign_id = await _create_auto_campaign(db, org_id, sdr_id, vp)
-        steps.append("Campaign created (email → email → call)")
+        steps.append(f"SDR '{name}' deployed with {assigned} leads")
+
+        # Create campaign
+        from app.models.campaign import Campaign, CampaignStep
+        campaign = Campaign(
+            org_id=org_id, sdr_profile_id=sdr.id,
+            name=f"{vp.product_name or 'Outreach'} Campaign",
+            status="active", ai_generated=True,
+        )
+        db.add(campaign)
+        await db.flush()
+        for i, (ch, delay) in enumerate([("email", 0), ("email", 3), ("call", 7)]):
+            db.add(CampaignStep(campaign_id=campaign.id, step_order=i + 1, channel=ch, delay_days=delay))
+        await db.flush()
+        steps.append("→ 3-step campaign created (email → email → call)")
     except Exception as e:
-        logger.warning("SDR deployment failed: %s", e)
-        steps.append(f"SDR deployment failed: {e}")
+        logger.warning("SDR deploy failed: %s", e)
+        steps.append(f"SDR deploy failed: {e}")
     return steps
 
 
-async def _assign_leads_to_sdr(db: AsyncSession, org_id: str, sdr_id: str) -> int:
-    from app.models.agent import LeadState
-    result = await db.execute(
-        select(Lead).where(Lead.org_id == org_id)
-    )
-    leads = list(result.scalars().all())
-    assigned = 0
-    for lead in leads:
-        existing = await db.execute(
-            select(LeadState).where(
-                LeadState.org_id == org_id,
-                LeadState.lead_id == lead.id,
-                LeadState.sdr_profile_id == sdr_id,
-            )
-        )
-        if existing.scalar_one_or_none():
-            continue
-        ls = LeadState(
-            org_id=org_id, lead_id=lead.id, sdr_profile_id=sdr_id,
-            state="new", priority=50,
-        )
-        db.add(ls)
-        assigned += 1
-    if assigned:
-        await db.flush()
-    return assigned
+async def _create_outreach_mission(db: AsyncSession, org_id: str, vp_id: str, mission_data: dict) -> list[str]:
+    steps = []
+    mission = await create_mission(db, org_id, vp_id, mission_data["name"], mission_data["objective"], mission_data.get("kpi"))
+    steps.append(f"Mission: {mission.name}")
 
+    tasks = await decompose_mission(db, org_id, vp_id, mission)
+    for task in tasks:
+        try:
+            agent = OutreachAgent(db, org_id)
+            agent.agent_id = task.id
+            report = await agent.run(task)
+            steps.append(f"SDR Agent: {report.get('work_completed', 'planned')}")
+        except Exception as e:
+            steps.append(f"SDR planning failed: {e}")
 
-async def _create_auto_campaign(db: AsyncSession, org_id: str, sdr_id: str, vp: VPSalesProfile) -> str:
-    from app.models.campaign import Campaign, CampaignStep
-    campaign = Campaign(
-        org_id=org_id, sdr_profile_id=sdr_id,
-        name=f"{vp.product_name or 'Outreach'} Campaign",
-        description=f"Auto-generated for {vp.product_name or 'prospecting'}. Target: {vp.target_country or 'global'}",
-        status="active", ai_generated=True,
-    )
-    db.add(campaign)
-    await db.flush()
-
-    step1 = CampaignStep(campaign_id=campaign.id, step_order=1, channel="email", delay_days=0)
-    step2 = CampaignStep(campaign_id=campaign.id, step_order=2, channel="email", delay_days=3)
-    step3 = CampaignStep(campaign_id=campaign.id, step_order=3, channel="call", delay_days=7)
-    db.add_all([step1, step2, step3])
-    await db.flush()
-
-    await log_vp_action(db, org_id, vp.id, "campaign_created",
-                        f"Campaign '{campaign.name}' created for SDR {sdr_id[:8]}",
-                        {"campaign_id": campaign.id, "sdr_id": sdr_id})
-    return campaign.id
+    evaluation = await evaluate_mission_reports(db, org_id, vp_id, mission)
+    steps.append(f"VP review: {evaluation['verdict']}")
+    return steps
 
 
 async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile) -> dict:
-    if not vp.product_name and not vp.target_country:
-        await log_vp_action(db, org_id, vp.id, "setup_needed",
-                            "VP profile incomplete. Add product and target country.", {})
-        return {"action": "setup_needed", "reasoning": "Fill in product and target country in VP profile", "actions_executed": []}
+    situation = await assess_situation(db, org_id)
+    decision = await _vp_decide(db, org_id, vp, situation)
 
-    situation = await assess_lead_situation(db, org_id, vp)
-    situation["_org_id"] = org_id
-    plan = await _vp_strategic_plan(db, situation, vp)
+    await log_vp_action(db, org_id, vp.id, decision["action"], decision["reasoning"])
 
-    await log_vp_action(db, org_id, vp.id, "vp_decided",
-                        reasoning=plan["reasoning"],
-                        details={"plan": plan, "situation": situation})
+    steps = []
+    action = decision["action"]
 
-    steps = await _execute_vp_plan(db, org_id, vp, plan)
+    if action == "research":
+        steps = await _execute_research_mission(db, org_id, vp.id, decision["mission"])
+    elif action == "convert":
+        result = await db.execute(
+            select(ResearchResult).where(
+                ResearchResult.org_id == org_id, ResearchResult.converted_to_lead == False,
+            )
+        )
+        c = 0
+        for rr in result.scalars().all():
+            if await convert_to_lead(db, org_id, rr.id):
+                c += 1
+        steps.append(f"Converted {c} research results to CRM leads")
+    elif action == "deploy_sdr":
+        steps = await _deploy_sdr(db, org_id, vp, decision["sdr_name"])
+    elif action == "campaign":
+        steps = await _create_outreach_mission(db, org_id, vp.id, decision["mission"])
+    else:
+        steps.append("VP monitoring — no action needed")
 
-    final_situation = await assess_lead_situation(db, org_id, vp)
+    final = await assess_situation(db, org_id)
 
     return {
-        "action": plan["action"],
-        "reasoning": plan["reasoning"],
-        "actions_executed": steps,
-        "leads_before": situation["total_leads"],
-        "leads_after": final_situation["total_leads"],
-        "sdrs_before": situation["total_sdrs"],
-        "sdrs_after": final_situation["total_sdrs"],
-        "missions_active": final_situation["active_missions"],
+        "action": action,
+        "reasoning": decision["reasoning"],
+        "actions": steps,
+        "leads_before": situation["leads"],
+        "leads_after": final["leads"],
+        "sdrs_before": situation["sdrs"],
+        "sdrs_after": final["sdrs"],
     }
 
 
 async def get_vp_dashboard(db: AsyncSession, org_id: str, vp_id: str) -> dict:
-    agents = await db.execute(
-        select(ResearchAgent).where(
-            ResearchAgent.org_id == org_id,
-            ResearchAgent.vp_id == vp_id,
-        )
-    )
-    all_agents = list(agents.scalars().all())
-    total_research_leads = sum(a.leads_discovered or 0 for a in all_agents)
-
-    sdr_result = await db.execute(
-        select(SDRProfile).where(
-            SDRProfile.org_id == org_id,
-            SDRProfile.deleted_at.is_(None),
-        )
-    )
-    all_sdrs = list(sdr_result.scalars().all())
-    active_sdrs = [s for s in all_sdrs if s.is_active]
-
-    meetings_result = await db.execute(
-        select(func.count()).select_from(Lead)
-        .where(Lead.org_id == org_id, Lead.status == "meeting_scheduled")
-    )
-    meetings_generated = meetings_result.scalar() or 0
-
     vp = await db.get(VPSalesProfile, vp_id)
-
-    missions = await get_vp_missions(db, org_id)
+    situation = await assess_situation(db, org_id)
     decisions = await get_vp_decisions(db, org_id, vp_id)
 
-    agent_perf = await db.execute(
-        select(AgentPerformance).where(AgentPerformance.org_id == org_id)
-    )
-    perf_rows = agent_perf.scalars().all()
-    agent_kpis = {}
-    for p in perf_rows:
-        key = f"{p.agent_type}_{p.metric_name}"
-        if key not in agent_kpis or p.updated_at > agent_kpis[key]["updated_at"]:
-            agent_kpis[key] = {
-                "agent_type": p.agent_type,
-                "metric_name": p.metric_name,
-                "metric_value": p.metric_value,
-                "period": p.period,
-                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-            }
+    # Get research leads count
+    agents = await db.execute(select(ResearchAgent).where(ResearchAgent.org_id == org_id))
+    total_research = sum(a.leads_discovered or 0 for a in agents.scalars().all())
+
+    # Get meetings
+    meetings = await db.scalar(
+        select(func.count()).select_from(Lead).where(
+            Lead.org_id == org_id, Lead.status == "meeting_scheduled",
+        )
+    ) or 0
+
+    # Get missions
+    missions = await get_vp_missions(db, org_id)
 
     return {
-        "active_agents": len([a for a in all_agents if a.status == "running"]),
-        "total_agents": len(all_agents),
-        "leads_collected": total_research_leads,
-        "crm_leads": await db.scalar(
-            select(func.count(Lead.id)).where(Lead.org_id == org_id)
-        ) or 0,
-        "unconverted_research": await db.scalar(
-            select(func.count(ResearchResult.id)).where(
-                ResearchResult.org_id == org_id,
-                ResearchResult.converted_to_lead == False,
-            )
-        ) or 0,
-        "sdrs_created": len(all_sdrs),
-        "active_sdrs": len(active_sdrs),
-        "meetings_generated": meetings_generated,
-        "sources_used": await get_enabled_sources(db, org_id),
-        "outreach_active": bool(vp and vp.outreach_active),
+        "leads": situation["leads"],
+        "unconverted_research": situation["unconverted_research"],
+        "research_agents": situation["research_agents"],
+        "total_research_leads": total_research,
+        "sdrs": situation["sdrs"],
+        "active_sdrs": situation["active_sdrs"],
+        "meetings": meetings,
+        "active_missions": situation["active_missions"],
+        "sources": situation["sources"],
         "recent_decisions": decisions,
-        "active_missions": len([m for m in missions if m["status"] in ("in_progress", "draft")]),
         "missions": missions[:5],
-        "agent_performance": list(agent_kpis.values()),
+        "outreach_active": bool(vp and vp.outreach_active),
     }
