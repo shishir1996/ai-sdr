@@ -3,7 +3,8 @@ import json
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.models.vp_sales import VPSalesProfile, ResearchAgent, ResearchResult, VPActionLog
+from app.models.vp_sales import VPSalesProfile, ResearchResult, VPActionLog
+from app.models.vp_sales import ResearchAgent as ResearchAgentModel
 from app.models.vp_orchestration import Mission, MissionTask
 from app.models.agent import SDRProfile
 from app.models.lead import Lead
@@ -64,7 +65,7 @@ async def assess_situation(db: AsyncSession, org_id: str) -> dict:
             )
         ) or 0,
         "research_agents": await db.scalar(
-            select(func.count(ResearchAgent.id)).where(ResearchAgent.org_id == org_id)
+            select(func.count(ResearchAgentModel.id)).where(ResearchAgentModel.org_id == org_id)
         ) or 0,
         "sources": await get_enabled_sources(db, org_id),
     }
@@ -332,7 +333,7 @@ async def get_vp_dashboard(db: AsyncSession, org_id: str, vp_id: str) -> dict:
     decisions = await get_vp_decisions(db, org_id, vp_id)
 
     # Get research leads count
-    agents = await db.execute(select(ResearchAgent).where(ResearchAgent.org_id == org_id))
+    agents = await db.execute(select(ResearchAgentModel).where(ResearchAgentModel.org_id == org_id))
     total_research = sum(a.leads_discovered or 0 for a in agents.scalars().all())
 
     # Get meetings

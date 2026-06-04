@@ -13,6 +13,7 @@ from app.services.vp.decision_engine import (
     decide_and_execute, get_vp_dashboard, get_vp_decisions, log_vp_action, assess_situation,
 )
 from app.services.research.agent_service import create_research_agent, execute_research, get_agent_results
+from app.services.research.search_service import get_search_progress, clear_search_progress
 from app.services.mission.mission_service import (
     create_mission, decompose_mission, evaluate_mission_reports,
     get_vp_missions, get_mission_detail, assign_task_to_agent,
@@ -443,6 +444,45 @@ async def create_mission_endpoint(
 async def search_progress(session_id: str):
     progress = get_search_progress(session_id)
     return {"progress": progress}
+
+
+@router.post("/reset")
+async def reset_vp_data(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all leads, research results, missions, agents, and logs for this org."""
+    from app.models.vp_sales import ResearchResult, ResearchAgent, VPActionLog, VPSalesProfile
+    from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
+    from app.models.lead import Lead
+    from app.models.agent import SDRProfile, LeadState
+    from app.models.campaign import Campaign, CampaignStep, CampaignEvent
+
+    org_id = user.org_id
+    tables = [
+        ResearchResult, ResearchAgent, VPActionLog,
+        AgentMemory, AgentPerformance,
+        MissionTask, Mission,
+        LeadState, SDRProfile,
+        CampaignEvent, CampaignStep, Campaign,
+        Lead,
+    ]
+    counts = {}
+    for table in tables:
+        result = await db.execute(select(table).where(table.org_id == org_id))
+        rows = result.scalars().all()
+        counts[table.__tablename__] = len(rows)
+        for row in rows:
+            await db.delete(row)
+
+    # Also clear search progress
+    clear_search_progress(org_id)
+
+    await db.flush()
+    return {
+        "message": "All data reset for this organization",
+        "deleted": counts,
+    }
 
 
 @router.get("/missions/{mission_id}")
