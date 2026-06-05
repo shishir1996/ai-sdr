@@ -36,6 +36,8 @@ class VPCreateRequest(BaseModel):
     target_titles: Optional[str] = None
     target_business_types: Optional[str] = None
     outreach_active: Optional[bool] = None
+    data_source: Optional[str] = "web_scraping"
+    data_source_config: Optional[dict] = None
 
 
 class ResearchAgentCreateRequest(BaseModel):
@@ -89,6 +91,9 @@ async def get_vp_profile(
         "target_titles": vp.target_titles,
         "target_business_types": vp.target_business_types,
         "outreach_active": bool(vp.outreach_active),
+        "data_source": vp.data_source,
+        "data_source_config": vp.data_source_config,
+        "manual_upload_done": bool(vp.manual_upload_done),
         "is_active": vp.is_active,
         "created_at": vp.created_at.isoformat() if vp.created_at else None,
         "updated_at": vp.updated_at.isoformat() if vp.updated_at else None,
@@ -121,6 +126,8 @@ async def create_vp_profile(
         target_titles=req.target_titles,
         target_business_types=req.target_business_types,
         outreach_active=bool(req.outreach_active) if req.outreach_active is not None else False,
+        data_source=req.data_source or "web_scraping",
+        data_source_config=req.data_source_config,
     )
     db.add(vp)
     await db.flush()
@@ -152,6 +159,10 @@ async def update_vp_profile(
             setattr(vp, field, value)
     if req.outreach_active is not None:
         vp.outreach_active = req.outreach_active
+    if req.data_source is not None:
+        vp.data_source = req.data_source
+    if req.data_source_config is not None:
+        vp.data_source_config = req.data_source_config
     await db.flush()
     return {"message": "VP profile updated"}
 
@@ -358,6 +369,25 @@ async def toggle_outreach(
     await log_vp_action(db, user.org_id, vp.id, "outreach_toggled",
                         f"AI Sales Team {'ACTIVATED' if vp.outreach_active else 'DEACTIVATED'}")
     return {"outreach_active": bool(vp.outreach_active), "message": f"AI Sales Team {'activated' if vp.outreach_active else 'deactivated'}"}
+
+
+@router.post("/mark-manual-upload-done")
+async def mark_manual_upload_done(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner has finished manually uploading leads. VP can now proceed."""
+    result = await db.execute(
+        select(VPSalesProfile).where(VPSalesProfile.org_id == user.org_id)
+    )
+    vp = result.scalar_one_or_none()
+    if not vp:
+        raise HTTPException(status_code=404, detail="VP profile not found")
+    vp.manual_upload_done = True
+    await db.flush()
+    await log_vp_action(db, user.org_id, vp.id, "manual_upload_done",
+                        "Owner marked manual lead upload as complete")
+    return {"message": "Manual upload marked as done", "manual_upload_done": True}
 
 
 @router.delete("/agents/{agent_id}")

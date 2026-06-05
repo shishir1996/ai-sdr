@@ -95,7 +95,15 @@ class SDRProfile(Base):
 
     # LinkedIn credentials: {"email":"...","password":"..."}
     linkedin_credentials_encrypted = Column(Text, nullable=True)
+
+    # Vapi voice credentials: {"phone_number":"...","assistant_id":"...","voice_id":"...","script":"..."}
+    vapi_credentials_encrypted = Column(Text, nullable=True)
     # ============================================================
+
+    # Channel toggles
+    email_enabled = Column(Boolean, default=True)
+    linkedin_enabled = Column(Boolean, default=True)
+    vapi_enabled = Column(Boolean, default=False)
 
     # Status
     is_active = Column(Boolean, default=False)

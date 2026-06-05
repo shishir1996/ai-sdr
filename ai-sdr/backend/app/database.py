@@ -179,6 +179,12 @@ async def init_db() -> bool:
                     "ADD COLUMN metric_value FLOAT DEFAULT 0",
                     "ADD COLUMN period VARCHAR(50) DEFAULT 'all_time'",
                 ]),
+                ("sdr_profiles", [
+                    "ADD COLUMN vapi_credentials_encrypted TEXT",
+                    "ADD COLUMN email_enabled BOOLEAN DEFAULT TRUE",
+                    "ADD COLUMN linkedin_enabled BOOLEAN DEFAULT TRUE",
+                    "ADD COLUMN vapi_enabled BOOLEAN DEFAULT FALSE",
+                ]),
             ]:
                 for col in cols:
                     try:
@@ -195,6 +201,9 @@ async def init_db() -> bool:
                 "ADD COLUMN outreach_active BOOLEAN DEFAULT FALSE",
                 "ADD COLUMN target_titles TEXT",
                 "ADD COLUMN target_business_types TEXT",
+                "ADD COLUMN data_source VARCHAR(50) DEFAULT 'web_scraping'",
+                "ADD COLUMN data_source_config JSON",
+                "ADD COLUMN manual_upload_done BOOLEAN DEFAULT FALSE",
             ]:
                     try:
                         await conn.execute(text("SAVEPOINT mig_sp2"))

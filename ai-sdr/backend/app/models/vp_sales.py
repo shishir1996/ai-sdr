@@ -33,6 +33,12 @@ class VPSalesProfile(Base):
     outreach_active = Column(Boolean, default=False)
     target_titles = Column(Text, nullable=True)
     target_business_types = Column(Text, nullable=True)
+
+    # Data source: how the VP obtains leads
+    data_source = Column(String(50), default="web_scraping")  # manual | web_scraping | third_party
+    data_source_config = Column(JSON, nullable=True)  # platform choices, search queries, etc.
+    manual_upload_done = Column(Boolean, default=False)  # tracks if manual upload was completed
+
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

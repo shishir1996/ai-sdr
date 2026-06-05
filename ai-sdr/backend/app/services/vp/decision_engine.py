@@ -146,14 +146,48 @@ async def _vp_decide_rules(vp: VPSalesProfile, situation: dict) -> dict:
     if situation["leads"] < 10:
         biz = vp.target_business_types or vp.icp_description or "businesses"
         country = vp.target_country or "global"
+        ds = vp.data_source or "web_scraping"
+
+        # Manual: wait for owner to upload
+        if ds == "manual":
+            if not vp.manual_upload_done:
+                return {
+                    "action": "wait_for_upload",
+                    "reasoning": f"Manual mode: waiting for owner to upload leads. Upload via Leads > Import CSV.",
+                }
+            return {
+                "action": "monitor",
+                "reasoning": f"Manual mode: {situation['leads']} leads uploaded. Use leads.",
+            }
+
+        # Third party: launch Apollo/Lusha agents
+        if ds == "third_party":
+            cfg = vp.data_source_config or {}
+            platforms = cfg.get("platforms", ["apollo"])
+            return {
+                "action": "research",
+                "reasoning": f"Third-party mode: fetching {biz} from {', '.join(platforms)} in {country}.",
+                "mission": {
+                    "name": f"Find {country} {biz} via third-party",
+                    "objective": f"Find real {biz} owners in {country} from {', '.join(platforms)}. Need email and phone.",
+                    "kpi": "At least 20 leads with verified contact info",
+                },
+                "data_source_config": cfg,
+            }
+
+        # Default: web scraping
+        cfg = vp.data_source_config or {}
+        queries = cfg.get("search_queries", "")
         return {
             "action": "research",
-            "reasoning": f"Only {situation['leads']} leads. Launching research to find {biz} in {country}.",
+            "reasoning": f"Web scraping: finding {biz} in {country}.",
             "mission": {
                 "name": f"Find {country} {biz}",
                 "objective": f"Find real {biz} owners in {country} with email and phone. Target: {vp.product_name or ''} ICP.",
                 "kpi": "At least 20 leads with verified contact info",
             },
+            "data_source_config": cfg,
+            "search_queries": queries,
         }
 
     if situation["unconverted_research"] > 0:
@@ -260,7 +294,7 @@ async def _deploy_sdr(db: AsyncSession, org_id: str, vp: VPSalesProfile, name: s
 
         steps.append(f"SDR '{name}' deployed with {assigned} leads")
 
-        # Create campaign
+        # Create campaign — only use channels enabled on the SDR
         from app.models.campaign import Campaign, CampaignStep
         campaign = Campaign(
             org_id=org_id, sdr_profile_id=sdr.id,
@@ -269,10 +303,25 @@ async def _deploy_sdr(db: AsyncSession, org_id: str, vp: VPSalesProfile, name: s
         )
         db.add(campaign)
         await db.flush()
-        for i, (ch, delay) in enumerate([("email", 0), ("email", 3), ("call", 7)]):
+
+        # Build campaign sequence based on enabled channels
+        channels = []
+        if sdr.email_enabled:
+            channels.append(("email", 0))
+        if sdr.linkedin_enabled:
+            channels.append(("linkedin", 2))
+        if sdr.vapi_enabled:
+            channels.append(("call", 5))
+        if sdr.email_enabled and len(channels) >= 2:
+            channels.append(("email", 7))
+        if not channels:
+            channels = [("email", 0)]
+
+        for i, (ch, delay) in enumerate(channels):
             db.add(CampaignStep(campaign_id=campaign.id, step_order=i + 1, channel=ch, delay_days=delay))
         await db.flush()
-        steps.append("→ 3-step campaign created (email → email → call)")
+        step_labels = " → ".join([ch for ch, _ in channels])
+        steps.append(f"→ {len(channels)}-step campaign created ({step_labels})")
     except Exception as e:
         logger.warning("SDR deploy failed: %s", e)
         steps.append(f"SDR deploy failed: {e}")
@@ -371,6 +420,8 @@ async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile,
         steps = await _deploy_sdr(db, org_id, vp, decision["sdr_name"])
     elif action == "campaign":
         steps = await _create_outreach_mission(db, org_id, vp.id, decision["mission"])
+    elif action == "wait_for_upload":
+        steps.append("Manual mode: VP is waiting for the owner to upload leads via the Leads page.")
     else:
         steps.append("VP monitoring — no action needed")
 

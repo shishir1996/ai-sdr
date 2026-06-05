@@ -355,6 +355,124 @@ async def save_sdr_linkedin_creds(
     return {"status": "saved", "account_email": body.email}
 
 
+# ============================================================
+# Vapi Voice Credentials
+# ============================================================
+class VapiCredentialsSave(BaseModel):
+    api_key: str
+    phone_number: Optional[str] = None
+    assistant_id: Optional[str] = None
+    voice_id: Optional[str] = None
+    script: Optional[str] = None
+    first_message: Optional[str] = None
+
+
+@router.put("/profiles/{profile_id}/vapi-creds")
+async def save_sdr_vapi_creds(
+    profile_id: str,
+    body: VapiCredentialsSave,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+
+    creds = {
+        "api_key": body.api_key,
+        "phone_number": body.phone_number,
+        "assistant_id": body.assistant_id,
+        "voice_id": body.voice_id,
+        "script": body.script,
+        "first_message": body.first_message,
+    }
+    profile.vapi_credentials_encrypted = encrypt_sdr_credentials(creds)
+    profile.vapi_enabled = True
+    await db.flush()
+    return {"status": "saved", "phone_number": body.phone_number}
+
+
+@router.delete("/profiles/{profile_id}/vapi-creds")
+async def delete_sdr_vapi_creds(
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+    profile.vapi_credentials_encrypted = None
+    profile.vapi_enabled = False
+    await db.flush()
+    return {"status": "cleared"}
+
+
+# ============================================================
+# Channel toggles
+# ============================================================
+class ChannelTogglesSave(BaseModel):
+    email_enabled: bool = True
+    linkedin_enabled: bool = True
+    vapi_enabled: bool = False
+
+
+@router.put("/profiles/{profile_id}/channels")
+async def save_sdr_channels(
+    profile_id: str,
+    body: ChannelTogglesSave,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+
+    profile.email_enabled = body.email_enabled
+    profile.linkedin_enabled = body.linkedin_enabled
+    profile.vapi_enabled = body.vapi_enabled and bool(profile.vapi_credentials_encrypted)
+    await db.flush()
+    return {
+        "email_enabled": profile.email_enabled,
+        "linkedin_enabled": profile.linkedin_enabled,
+        "vapi_enabled": profile.vapi_enabled,
+    }
+
+
+# ============================================================
+# Reset SDR configuration
+# ============================================================
+@router.post("/profiles/{profile_id}/reset-config")
+async def reset_sdr_config(
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Reset SDR credentials and configuration (keeps the SDR profile + lead assignments)."""
+    result = await db.execute(
+        select(SDRProfile).where(SDRProfile.id == profile_id, SDRProfile.org_id == user.org_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="SDR profile not found")
+    profile.email_credentials_encrypted = None
+    profile.linkedin_credentials_encrypted = None
+    profile.vapi_credentials_encrypted = None
+    profile.email_enabled = True
+    profile.linkedin_enabled = True
+    profile.vapi_enabled = False
+    await db.flush()
+    return {"status": "reset"}
+
+
 @router.delete("/profiles/{profile_id}/email-creds")
 async def delete_sdr_email_creds(
     profile_id: str,
