@@ -115,10 +115,22 @@ ALLOWED_ORIGINS = [
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # Always log the full exception with traceback so we can debug in production.
+    import logging, traceback
+    _log = logging.getLogger(__name__)
+    _log.error("=== EXCEPTION on %s %s ===", request.method, request.url.path)
+    _log.error("Exception type: %s", type(exc).__name__)
+    _log.error("Exception message: %s", str(exc)[:1000])
+    _log.error("Traceback:\n%s", traceback.format_exc())
     if settings.IS_PRODUCTION:
         response = JSONResponse(
             status_code=500,
-            content={"detail": "Internal server error", "request_id": request.headers.get("x-request-id", "")},
+            content={
+                "detail": "Internal server error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
+                "request_id": request.headers.get("x-request-id", ""),
+            },
         )
         origin = request.headers.get("origin", "")
         if origin in ALLOWED_ORIGINS:
