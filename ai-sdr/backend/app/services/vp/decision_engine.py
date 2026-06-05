@@ -304,19 +304,30 @@ async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile,
                              force_research: bool = False) -> dict:
     if force_research:
         # First wipe all old data so VP starts clean
-        tables = [
+        tables_with_org_id = [
             ResearchResult, ResearchAgentModel, VPActionLog,
             AgentMemory, AgentPerformance,
             MissionTask, Mission,
             LeadState, SDRProfile,
-            CampaignEvent, CampaignStep, Campaign,
+            CampaignEvent, Campaign,
             Lead,
         ]
-        for table in tables:
+        for table in tables_with_org_id:
             result = await db.execute(select(table).where(table.org_id == org_id))
             for row in result.scalars().all():
                 await db.delete(row)
         await db.flush()
+        # CampaignStep has no org_id — delete via campaign_id
+        from app.models.campaign import CampaignStep
+        camp_res = await db.execute(select(Campaign.id).where(Campaign.org_id == org_id))
+        campaign_ids = [r[0] for r in camp_res.all()]
+        if campaign_ids:
+            step_res = await db.execute(
+                select(CampaignStep).where(CampaignStep.campaign_id.in_(campaign_ids))
+            )
+            for row in step_res.scalars().all():
+                await db.delete(row)
+            await db.flush()
         clear_search_progress(org_id)
 
     situation = await assess_situation(db, org_id)

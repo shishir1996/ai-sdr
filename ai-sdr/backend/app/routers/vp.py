@@ -462,17 +462,21 @@ async def reset_vp_data(
     from app.models.agent_activity import CampaignEvent
 
     org_id = user.org_id
-    tables = [
+
+    # Tables that have an org_id column — filter directly
+    tables_with_org_id = [
         ResearchResult, ResearchAgent, VPActionLog,
         AgentMemory, AgentPerformance,
         MissionTask, Mission,
         LeadState, SDRProfile,
-        CampaignEvent, CampaignStep, Campaign,
+        CampaignEvent, Campaign,
         Lead,
     ]
+
+    # First delete rows that DO have org_id
     counts = {}
     last_error = None
-    for table in tables:
+    for table in tables_with_org_id:
         try:
             result = await db.execute(select(table).where(table.org_id == org_id))
             rows = result.scalars().all()
@@ -489,6 +493,28 @@ async def reset_vp_data(
         raise HTTPException(
             status_code=500,
             detail=f"Reset failed at table. {last_error}",
+        )
+
+    # CampaignStep has no org_id — find the org's campaign ids, then delete their steps
+    try:
+        camp_res = await db.execute(select(Campaign.id).where(Campaign.org_id == org_id))
+        campaign_ids = [r[0] for r in camp_res.all()]
+        if campaign_ids:
+            steps_res = await db.execute(
+                select(CampaignStep).where(CampaignStep.campaign_id.in_(campaign_ids))
+            )
+            step_rows = steps_res.scalars().all()
+            counts["campaign_steps"] = len(step_rows)
+            for row in step_rows:
+                await db.delete(row)
+            await db.flush()
+        else:
+            counts["campaign_steps"] = 0
+    except Exception as e:
+        logger.exception("Reset failed on campaign_steps")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Reset failed at table. campaign_steps: {type(e).__name__}: {str(e)[:200]}",
         )
 
     # Also clear search progress
