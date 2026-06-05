@@ -35,3 +35,4 @@ dnspython==2.6.1
 beautifulsoup4
 beautifulsoup4
 lxml
+playwright-stealth>=2.0.3

@@ -44,6 +44,15 @@ async def lifespan(app: FastAPI):
     init_supabase()
     db_ok = await init_db()
     await init_redis()
+
+    # Initialize headless browser for web research
+    try:
+        import subprocess, sys
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
+                       capture_output=True, timeout=120)
+        _log.info("Playwright Chromium installed")
+    except Exception as e:
+        _log.warning("Playwright browser install skipped (non-fatal): %s", e)
     if db_ok:
         try:
             async with async_session_factory() as db:
@@ -63,6 +72,14 @@ async def lifespan(app: FastAPI):
             print(f"[startup] Restarting SDR cycle for {profile.name} (org={profile.org_id})", flush=True)
             asyncio.create_task(start_sdr_cycle(profile.org_id, sdr_profile_id=profile.id))
     yield
+
+    # Cleanup headless browser
+    try:
+        from app.services.research.browser_service import close_browser
+        await close_browser()
+        _log.info("Headless browser closed")
+    except Exception as e:
+        _log.warning("Browser cleanup error: %s", e)
 
 
 app = FastAPI(

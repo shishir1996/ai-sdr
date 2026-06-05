@@ -7,6 +7,11 @@ import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.lead_sources.service import is_source_enabled
+from app.services.research.browser_service import (
+    google_search as browser_google_search,
+    google_business_search as browser_business_search,
+    visit_website as browser_visit_website,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +124,22 @@ def _make_result(title="", link="", snippet="", company_name="",
 
 async def _enrich_from_website(url: str, existing: dict) -> dict:
     """Visit a business website and extract contact info thoroughly."""
+    # Try headless browser first (handles JS-rendered pages)
+    try:
+        browser_result = await browser_visit_website(url)
+        if browser_result.get("contact_email"):
+            existing["contact_email"] = browser_result["contact_email"]
+        if browser_result.get("contact_phone"):
+            existing["contact_phone"] = browser_result["contact_phone"]
+        for k in ("city", "state", "postal_code"):
+            if browser_result.get(k):
+                existing[k] = browser_result[k]
+        if existing.get("contact_email"):
+            return existing
+    except Exception:
+        pass
+
+    # Fallback: HTTP scrape
     html = await _scrape_html(url, timeout=20)
     if not html:
         return existing
