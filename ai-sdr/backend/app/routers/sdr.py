@@ -64,6 +64,16 @@ def serialize_sdr(profile: SDRProfile) -> dict:
         "email_sender": get_email_sender(profile.email_credentials_encrypted) or "",
         "email_provider": (decrypt_sdr_credentials(profile.email_credentials_encrypted) or {}).get("provider", "") if profile.email_credentials_encrypted else "",
         "has_linkedin": has_linkedin_configured(profile.linkedin_credentials_encrypted),
+        # Channel toggles
+        "email_enabled": bool(profile.email_enabled),
+        "linkedin_enabled": bool(profile.linkedin_enabled),
+        "vapi_enabled": bool(profile.vapi_enabled),
+        "has_vapi": bool(profile.vapi_credentials_encrypted),
+        # Decrypted Vapi config (no api_key exposed)
+        "vapi_phone": (decrypt_sdr_credentials(profile.vapi_credentials_encrypted) or {}).get("phone_number", "") if profile.vapi_credentials_encrypted else "",
+        "vapi_assistant_id": (decrypt_sdr_credentials(profile.vapi_credentials_encrypted) or {}).get("assistant_id", "") if profile.vapi_credentials_encrypted else "",
+        "vapi_voice_id": (decrypt_sdr_credentials(profile.vapi_credentials_encrypted) or {}).get("voice_id", "") if profile.vapi_credentials_encrypted else "",
+        "vapi_first_message": (decrypt_sdr_credentials(profile.vapi_credentials_encrypted) or {}).get("first_message", "") if profile.vapi_credentials_encrypted else "",
         "is_active": bool(profile.is_active),
         "leads_target": profile.leads_target or 100,
         "created_at": profile.created_at.isoformat() if profile.created_at else "",
@@ -381,18 +391,21 @@ async def save_sdr_vapi_creds(
     if not profile:
         raise HTTPException(status_code=404, detail="SDR profile not found")
 
+    existing = decrypt_sdr_credentials(profile.vapi_credentials_encrypted) or {}
     creds = {
-        "api_key": body.api_key,
-        "phone_number": body.phone_number,
-        "assistant_id": body.assistant_id,
-        "voice_id": body.voice_id,
-        "script": body.script,
-        "first_message": body.first_message,
+        "api_key": body.api_key if body.api_key else existing.get("api_key", ""),
+        "phone_number": body.phone_number if body.phone_number is not None else existing.get("phone_number", ""),
+        "assistant_id": body.assistant_id if body.assistant_id is not None else existing.get("assistant_id", ""),
+        "voice_id": body.voice_id if body.voice_id is not None else existing.get("voice_id", ""),
+        "script": body.script if body.script is not None else existing.get("script", ""),
+        "first_message": body.first_message if body.first_message is not None else existing.get("first_message", ""),
     }
+    if not creds["api_key"]:
+        raise HTTPException(status_code=400, detail="API key is required for first save")
     profile.vapi_credentials_encrypted = encrypt_sdr_credentials(creds)
     profile.vapi_enabled = True
     await db.flush()
-    return {"status": "saved", "phone_number": body.phone_number}
+    return {"status": "saved", "phone_number": creds["phone_number"]}
 
 
 @router.delete("/profiles/{profile_id}/vapi-creds")

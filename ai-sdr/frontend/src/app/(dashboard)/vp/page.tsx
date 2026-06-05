@@ -5,6 +5,7 @@ import { api } from "@/lib/api-client"
 import {
   Brain, Target, Users, Mail, Globe, RefreshCw, Play, AlertTriangle,
   Search, BarChart3, MessageCircle, Power, X, ChevronRight, Activity,
+  Database, Upload, Globe2, Phone, Linkedin, Check, ArrowRight,
 } from "lucide-react"
 
 export default function VPPage() {
@@ -28,6 +29,10 @@ export default function VPPage() {
     business_goals: "", icp_description: "", target_country: "", target_audience: "",
     sales_objectives: "", target_business_types: "",
   })
+  const [wizardStep, setWizardStep] = useState(1)
+  const [dataSource, setDataSource] = useState<"manual" | "web_scraping" | "third_party">("web_scraping")
+  const [searchQueries, setSearchQueries] = useState("100 salons in India\nrestaurants in Mumbai\nsmall businesses in Bangalore")
+  const [platforms, setPlatforms] = useState<string[]>(["apollo"])
 
   const load = async () => {
     try {
@@ -63,8 +68,18 @@ export default function VPPage() {
   const createVP = async () => {
     setVpError("")
     try {
-      await api.post("/vp/profile", form)
+      const payload = {
+        ...form,
+        data_source: dataSource,
+        data_source_config: dataSource === "web_scraping"
+          ? { search_queries: searchQueries }
+          : dataSource === "third_party"
+          ? { platforms }
+          : {},
+      }
+      await api.post("/vp/profile", payload)
       setShowWizard(false)
+      setWizardStep(1)
       load()
     } catch (e: any) { setVpError(e.message) }
   }
@@ -142,30 +157,120 @@ export default function VPPage() {
             Create VP Sales AI
           </button>
         ) : (
-          <div className="space-y-4 bg-gray-800/40 p-6 rounded-xl border border-gray-700/50 backdrop-blur">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label className="text-xs text-gray-400 block mb-1">Product Name</label>
-                <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.product_name} onChange={e => setForm({...form, product_name: e.target.value})} placeholder="e.g. SaaS Platform" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">Target Country</label>
-                <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.target_country} onChange={e => setForm({...form, target_country: e.target.value})} placeholder="e.g. India" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">ICP Description</label>
-                <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.icp_description} onChange={e => setForm({...form, icp_description: e.target.value})} placeholder="e.g. small business owners" />
-              </div>
-              <div className="col-span-2">
-                <label className="text-xs text-gray-400 block mb-1">Target Business Types</label>
-                <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.target_business_types} onChange={e => setForm({...form, target_business_types: e.target.value})} placeholder="restaurants, salons, clinics (comma separated)" />
-              </div>
+          <div className="space-y-5 bg-gray-800/40 p-6 rounded-xl border border-gray-700/50 backdrop-blur">
+            {/* Step indicator */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className={`px-2.5 py-1 rounded-full ${wizardStep === 1 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-gray-700/50 text-gray-500"}`}>1. Product &amp; Target</span>
+              <ArrowRight size={12} className="text-gray-600" />
+              <span className={`px-2.5 py-1 rounded-full ${wizardStep === 2 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-gray-700/50 text-gray-500"}`}>2. Data Source</span>
             </div>
-            {vpError && <p className="text-red-400 text-sm">{vpError}</p>}
-            <div className="flex gap-3">
-              <button onClick={createVP} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-sm transition-all">Create</button>
-              <button onClick={() => setShowWizard(false)} className="py-2.5 px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm">Cancel</button>
-            </div>
+
+            {wizardStep === 1 && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Product Name</label>
+                  <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.product_name} onChange={e => setForm({...form, product_name: e.target.value})} placeholder="e.g. SaaS Platform" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Product Description</label>
+                  <textarea className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm h-16 focus:outline-none focus:border-emerald-500" value={form.product_description} onChange={e => setForm({...form, product_description: e.target.value})} placeholder="What does your product do?" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Target Country</label>
+                    <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.target_country} onChange={e => setForm({...form, target_country: e.target.value})} placeholder="e.g. India" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">ICP Description</label>
+                    <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.icp_description} onChange={e => setForm({...form, icp_description: e.target.value})} placeholder="e.g. small business owners" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Target Business Types</label>
+                  <input className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" value={form.target_business_types} onChange={e => setForm({...form, target_business_types: e.target.value})} placeholder="restaurants, salons, clinics (comma separated)" />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button onClick={() => setWizardStep(2)} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2">
+                    Next: Choose Data Source <ArrowRight size={14} />
+                  </button>
+                  <button onClick={() => setShowWizard(false)} className="py-2.5 px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm">Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {wizardStep === 2 && (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-300">How should the VP obtain leads?</p>
+
+                <div className="space-y-2">
+                  {[
+                    { id: "manual", icon: Upload, label: "Manual Upload", desc: "You'll upload leads via CSV. VP waits for you.", color: "emerald" },
+                    { id: "web_scraping", icon: Globe2, label: "Web Scraping", desc: "VP creates scraping agents (Google, Bing, directories).", color: "blue" },
+                    { id: "third_party", icon: Database, label: "Third-Party APIs", desc: "VP fetches from Apollo, Lusha, ZoomInfo.", color: "purple" },
+                  ].map(opt => {
+                    const Icon = opt.icon
+                    const selected = dataSource === opt.id
+                    return (
+                      <button key={opt.id} onClick={() => setDataSource(opt.id as any)}
+                        className={`w-full text-left p-4 rounded-xl border transition-all flex items-center gap-3 ${
+                          selected
+                            ? "bg-emerald-500/10 border-emerald-500/40"
+                            : "bg-gray-900/40 border-gray-700/50 hover:border-gray-600"
+                        }`}>
+                        <div className={`p-2 rounded-lg ${selected ? "bg-emerald-500/20" : "bg-gray-800"}`}>
+                          <Icon size={18} className={selected ? "text-emerald-400" : "text-gray-400"} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm font-medium ${selected ? "text-emerald-300" : "text-white"}`}>{opt.label}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">{opt.desc}</div>
+                        </div>
+                        {selected && <Check size={16} className="text-emerald-400 shrink-0" />}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {dataSource === "web_scraping" && (
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Search Queries (one per line)</label>
+                    <textarea className="w-full bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs h-24 focus:outline-none focus:border-emerald-500" value={searchQueries} onChange={e => setSearchQueries(e.target.value)} />
+                  </div>
+                )}
+
+                {dataSource === "third_party" && (
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-2">Platforms</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {["apollo", "lusha", "zoominfo", "rocketreach"].map(p => {
+                        const selected = platforms.includes(p)
+                        return (
+                          <button key={p} onClick={() => setPlatforms(selected ? platforms.filter(x => x !== p) : [...platforms, p])}
+                            className={`px-3 py-2 rounded-lg text-sm capitalize border transition-all ${
+                              selected ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300" : "bg-gray-900/40 border-gray-700/50 text-gray-400 hover:border-gray-600"
+                            }`}>
+                            {selected && "✓ "}{p}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {dataSource === "manual" && (
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
+                    After creating the VP, go to <strong>Leads → Import CSV</strong> to upload your leads file. Then click "Mark Upload Done" on the VP page to continue.
+                  </div>
+                )}
+
+                {vpError && <p className="text-red-400 text-sm">{vpError}</p>}
+                <div className="flex gap-3 pt-2">
+                  <button onClick={() => setWizardStep(1)} className="px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm">Back</button>
+                  <button onClick={createVP} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2">
+                    <Check size={14} /> Create VP
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -241,6 +346,36 @@ export default function VPPage() {
           <button onClick={() => setActionError("")} className="text-red-400 hover:text-red-300"><X size={14} /></button>
         </div>
       )}
+
+      {/* Manual Mode Banner */}
+      {vp.data_source === "manual" && !vp.manual_upload_done && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+          <Upload size={16} className="text-blue-400 shrink-0" />
+          <div className="flex-1">
+            <div className="text-sm text-blue-300 font-medium">Manual Mode: Waiting for upload</div>
+            <div className="text-xs text-blue-400/70 mt-0.5">Go to <strong>Leads → Import CSV</strong> to upload your leads. Then click "Mark Upload Done" below.</div>
+          </div>
+          <button onClick={async () => { try { await api.post("/vp/mark-manual-upload-done", {}); load() } catch (e: any) { setActionError(e.message) } }}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-all">
+            Mark Upload Done
+          </button>
+        </div>
+      )}
+
+      {/* Data Source Display */}
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span>Data Source:</span>
+        <span className={`px-2 py-0.5 rounded-full ${
+          vp.data_source === "manual" ? "bg-amber-500/10 text-amber-400 border border-amber-500/30" :
+          vp.data_source === "third_party" ? "bg-purple-500/10 text-purple-400 border border-purple-500/30" :
+          "bg-blue-500/10 text-blue-400 border border-blue-500/30"
+        }`}>
+          {vp.data_source === "manual" ? "Manual Upload" : vp.data_source === "third_party" ? "Third-Party APIs" : "Web Scraping"}
+        </span>
+        {vp.data_source === "third_party" && vp.data_source_config?.platforms && (
+          <span className="text-gray-600">· {vp.data_source_config.platforms.join(", ")}</span>
+        )}
+      </div>
 
       {/* Profile Edit Modal */}
       {showEdit && (
