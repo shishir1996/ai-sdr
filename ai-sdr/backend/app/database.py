@@ -114,28 +114,39 @@ async def init_db() -> bool:
                     _log.warning("=== Tables MISSING after create_all (will be ignored): %s ===", sorted(missing))
 
                 # Single helper: query information_schema first, only ALTER if column missing.
-                # This avoids the SAVEPOINT/asyncpg interaction problem.
+                # Avoids the SAVEPOINT/asyncpg interaction problem. Uses f-strings only (no
+                # bindparams, which can fail silently with asyncpg + SQLAlchemy).
                 async def _add_columns_if_missing(table: str, column_defs: list) -> None:
                     """Add columns to `table` if they don't exist. column_defs is a list of dicts: {name, type, default, nullable}."""
+                    # Whitelist table and column names to a safe character set to prevent SQL injection.
+                    safe_table = "".join(ch for ch in table if ch.isalnum() or ch == "_")
+                    if safe_table != table:
+                        _log.error("=== _add_columns_if_missing: invalid table name %s, skipping ===", table)
+                        return
                     for cd in column_defs:
-                        col_name = cd["name"]
+                        col_name = "".join(ch for ch in cd["name"] if ch.isalnum() or ch == "_")
+                        if col_name != cd["name"]:
+                            _log.error("=== _add_columns_if_missing: invalid column name %s, skipping ===", cd["name"])
+                            continue
                         try:
-                            exists = await conn.execute(
-                                text(
-                                    "SELECT 1 FROM information_schema.columns "
-                                    "WHERE table_schema='public' AND table_name=:t AND column_name=:c"
-                                ),
-                                {"t": table, "c": col_name},
+                            check_sql = (
+                                f"SELECT 1 FROM information_schema.columns "
+                                f"WHERE table_schema='public' AND table_name='{safe_table}' "
+                                f"AND column_name='{col_name}' LIMIT 1"
                             )
+                            exists = await conn.execute(text(check_sql))
                             if exists.first() is not None:
                                 continue
                             nullable = "NULL" if cd.get("nullable", True) else "NOT NULL"
                             default = f" DEFAULT {cd['default']}" if cd.get("default") is not None else ""
-                            sql = f'ALTER TABLE "{table}" ADD COLUMN "{col_name}" {cd["type"]} {nullable}{default}'
+                            # Use IF NOT EXISTS so this is safe to run multiple times even if the
+                            # existence check above missed (e.g. concurrent run or different schema).
+                            sql = f'ALTER TABLE "{safe_table}" ADD COLUMN IF NOT EXISTS "{col_name}" {cd["type"]} {nullable}{default}'
+                            _log.warning("=== Running: %s ===", sql)
                             await conn.execute(text(sql))
-                            _log.warning("=== Added column %s.%s ===", table, col_name)
+                            _log.warning("=== Added column %s.%s ===", safe_table, col_name)
                         except Exception as ce:
-                            _log.warning("=== _add_columns_if_missing skipped %s.%s: %s ===", table, col_name, ce)
+                            _log.warning("=== _add_columns_if_missing skipped %s.%s: %s ===", safe_table, col_name, ce)
 
                 await _add_columns_if_missing("email_messages", [
                     {"name": "direction", "type": "VARCHAR(20)", "nullable": True, "default": "'outbound'"},
