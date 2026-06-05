@@ -106,13 +106,25 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
+ALLOWED_ORIGINS = [
+    "https://outreacai.offdx.in",
+    "https://www.outreacai.offdx.in",
+    "https://ai-sdr-mauve.vercel.app",
+    "http://localhost:3000",
+]
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     if settings.IS_PRODUCTION:
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
             content={"detail": "Internal server error", "request_id": request.headers.get("x-request-id", "")},
         )
+        origin = request.headers.get("origin", "")
+        if origin in ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
     raise exc
 
 

@@ -8,7 +8,8 @@ from app.models.vp_sales import ResearchAgent as ResearchAgentModel
 from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
 from app.models.agent import SDRProfile, LeadState
 from app.models.lead import Lead
-from app.models.campaign import Campaign, CampaignStep, CampaignEvent
+from app.models.campaign import Campaign, CampaignStep
+from app.models.agent_activity import CampaignEvent
 from app.services.lead_sources.service import get_enabled_sources
 from app.services.research.search_service import clear_search_progress
 from app.services.research.agent_service import convert_to_lead

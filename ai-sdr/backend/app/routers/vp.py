@@ -458,7 +458,8 @@ async def reset_vp_data(
     from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
     from app.models.lead import Lead
     from app.models.agent import SDRProfile, LeadState
-    from app.models.campaign import Campaign, CampaignStep, CampaignEvent
+    from app.models.campaign import Campaign, CampaignStep
+    from app.models.agent_activity import CampaignEvent
 
     org_id = user.org_id
     tables = [
