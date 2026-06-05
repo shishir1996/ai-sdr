@@ -471,17 +471,29 @@ async def reset_vp_data(
         Lead,
     ]
     counts = {}
+    last_error = None
     for table in tables:
-        result = await db.execute(select(table).where(table.org_id == org_id))
-        rows = result.scalars().all()
-        counts[table.__tablename__] = len(rows)
-        for row in rows:
-            await db.delete(row)
+        try:
+            result = await db.execute(select(table).where(table.org_id == org_id))
+            rows = result.scalars().all()
+            counts[table.__tablename__] = len(rows)
+            for row in rows:
+                await db.delete(row)
+            await db.flush()
+        except Exception as e:
+            last_error = f"{table.__tablename__}: {type(e).__name__}: {str(e)[:200]}"
+            logger.exception("Reset failed on table %s", table.__tablename__)
+            break
+
+    if last_error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Reset failed at table. {last_error}",
+        )
 
     # Also clear search progress
     clear_search_progress(org_id)
 
-    await db.flush()
     return {
         "message": "All data reset for this organization",
         "deleted": counts,
