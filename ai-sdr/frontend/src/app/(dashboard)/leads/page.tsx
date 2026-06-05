@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { api, API_BASE } from "@/lib/api-client"
 import {
   Users, Search, RefreshCw, Mail, Phone, MapPin, Star, X, Filter,
-  Download, Loader, Trash2, ChevronDown, CheckSquare, Square,
+  Download, Loader, Trash2, ChevronDown, CheckSquare, Square, AlertTriangle,
 } from "lucide-react"
 
 interface LeadRecord {
@@ -67,6 +67,7 @@ export default function LeadsPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [deleting, setDeleting] = useState(false)
+  const [actionError, setActionError] = useState("")
   const [pageLeadsIds, setPageLeadsIds] = useState<string[]>([])
   const perPage = 25
 
@@ -141,23 +142,25 @@ export default function LeadsPage() {
     if (selected.size === 0) return
     if (!confirm(`Delete ${selected.size} selected lead(s)?`)) return
     setDeleting(true)
+    setActionError("")
     try {
       await api.post("/leads/bulk-delete", { ids: Array.from(selected) })
       setSelected(new Set())
       load()
       loadStats()
-    } catch (e) { console.error(e) }
+    } catch (e: any) { setActionError(e.message || "Delete failed") }
     finally { setDeleting(false) }
   }
 
   const deleteSingle = async (id: string, name: string) => {
     if (!confirm(`Delete lead "${name}"?`)) return
+    setActionError("")
     try {
       await api.delete(`/leads/${id}`)
       setSelected(prev => { const n = new Set(prev); n.delete(id); return n })
       load()
       loadStats()
-    } catch (e) { console.error(e) }
+    } catch (e: any) { setActionError(e.message || "Delete failed") }
   }
 
   return (
@@ -280,6 +283,15 @@ export default function LeadsPage() {
           </div>
         )}
       </div>
+
+      {/* Error Banner */}
+      {actionError && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="flex-1">{actionError}</span>
+          <button onClick={() => setActionError("")} className="text-red-400 hover:text-red-300"><X size={14} /></button>
+        </div>
+      )}
 
       {/* Leads Table */}
       <div className="bg-gray-800/20 rounded-xl border border-gray-700/50 overflow-hidden">

@@ -22,6 +22,7 @@ export default function VPPage() {
   const [progressSession, setProgressSession] = useState<string>("")
   const [resetting, setResetting] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [actionError, setActionError] = useState("")
   const [form, setForm] = useState({
     name: "VP Sales AI", product_name: "", product_description: "", service_description: "",
     business_goals: "", icp_description: "", target_country: "", target_audience: "",
@@ -70,31 +71,34 @@ export default function VPPage() {
 
   const runDecision = async (force = false) => {
     setExecuting(true)
+    setActionError("")
     setProgress([])
     const sid = Math.random().toString(36).slice(2)
     setProgressSession(sid)
     try {
       await api.post("/vp/decide", { progress_session: sid, force_research: force })
       load()
-    } catch (e) { console.error(e) }
+    } catch (e: any) { setActionError(e.message || "VP decision failed") }
     finally { setExecuting(false); setProgressSession("") }
   }
 
   const resetAll = async () => {
     setResetting(true)
+    setActionError("")
     try {
       await api.post("/vp/reset", {})
       setShowResetConfirm(false)
       load()
-    } catch (e) { console.error(e) }
+    } catch (e: any) { setActionError(e.message || "Reset failed") }
     finally { setResetting(false) }
   }
 
   const toggleOutreach = async () => {
+    setActionError("")
     try {
       await api.post("/vp/toggle-outreach")
       load()
-    } catch (e) { console.error(e) }
+    } catch (e: any) { setActionError(e.message || "Toggle failed") }
   }
 
   const openEdit = () => {
@@ -228,6 +232,15 @@ export default function VPPage() {
           </button>
         </div>
       </div>
+
+      {/* Error Banner */}
+      {actionError && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="flex-1">{actionError}</span>
+          <button onClick={() => setActionError("")} className="text-red-400 hover:text-red-300"><X size={14} /></button>
+        </div>
+      )}
 
       {/* Profile Edit Modal */}
       {showEdit && (
