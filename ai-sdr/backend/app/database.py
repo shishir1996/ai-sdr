@@ -48,34 +48,33 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db() -> bool:
-    if settings.DATABASE_URL.startswith("sqlite"):
+    is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+    try:
         async with engine.begin() as conn:
             from sqlalchemy import text
-            await conn.execute(text("PRAGMA journal_mode=WAL"))
-            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            if is_sqlite:
+                await conn.execute(text("PRAGMA journal_mode=WAL"))
+                await conn.execute(text("PRAGMA foreign_keys=ON"))
+
+            tables = sorted(Base.metadata.tables.keys())
+            _log.warning("=== Tables registered in Base.metadata (%d): %s ===", len(tables), tables)
+
             await conn.run_sync(Base.metadata.create_all)
-        return True
-    else:
-        try:
-            async with engine.begin() as conn:
-                tables = sorted(Base.metadata.tables.keys())
-                _log.warning("=== Tables registered in Base.metadata (%d): %s ===", len(tables), tables)
 
-                await conn.run_sync(Base.metadata.create_all)
-
-                from sqlalchemy import text
+            if not is_sqlite:
+                # Verify all expected tables are present in PostgreSQL.
                 result = await conn.execute(
                     text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
                 )
                 created = sorted(row[0] for row in result.fetchall())
                 _log.warning("=== Tables found in PostgreSQL (%d): %s ===", len(created), created)
                 missing = set(Base.metadata.tables.keys()) - set(created)
-                # Also check feature_flags specifically — if missing, fallback to raw SQL
                 has_feature_flags = "feature_flags" in created
+                if missing and has_feature_flags:
+                    _log.warning("=== Tables MISSING after create_all (will be ignored): %s ===", sorted(missing))
                 if not has_feature_flags:
                     _log.warning("=== feature_flags table missing — running railway_schema.sql fallback ===")
                     import pathlib
-                    # Try multiple paths for railway_schema.sql
                     schema_candidates = [
                         pathlib.Path(__file__).resolve().parent.parent / "railway_schema.sql",
                         pathlib.Path.cwd() / "railway_schema.sql",
@@ -96,7 +95,6 @@ async def init_db() -> bool:
                                     await conn.execute(text(stmt + ";"))
                                 except Exception as se:
                                     _log.warning("SQL fallback statement skipped: %.100s", str(se))
-                        # Re-verify table was actually created
                         result2 = await conn.execute(
                             text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
                         )
@@ -110,122 +108,131 @@ async def init_db() -> bool:
                     else:
                         _log.warning("=== railway_schema.sql not found (tried %d paths) ===", len(schema_candidates))
 
-                if missing and has_feature_flags:
-                    _log.warning("=== Tables MISSING after create_all (will be ignored): %s ===", sorted(missing))
+            # === Column migrations (run for BOTH SQLite and PostgreSQL) ===
+            # Single helper: query column existence first, only ALTER if column missing.
+            # Works on both PostgreSQL (uses information_schema) and SQLite (uses pragma_table_info).
+            # SQL is f-string interpolated but with strict alphanumeric whitelist to prevent injection.
 
-                # Single helper: query information_schema first, only ALTER if column missing.
-                # Avoids the SAVEPOINT/asyncpg interaction problem. Uses f-strings only (no
-                # bindparams, which can fail silently with asyncpg + SQLAlchemy).
-                async def _add_columns_if_missing(table: str, column_defs: list) -> None:
-                    """Add columns to `table` if they don't exist. column_defs is a list of dicts: {name, type, default, nullable}."""
-                    # Whitelist table and column names to a safe character set to prevent SQL injection.
-                    safe_table = "".join(ch for ch in table if ch.isalnum() or ch == "_")
-                    if safe_table != table:
-                        _log.error("=== _add_columns_if_missing: invalid table name %s, skipping ===", table)
-                        return
-                    for cd in column_defs:
-                        col_name = "".join(ch for ch in cd["name"] if ch.isalnum() or ch == "_")
-                        if col_name != cd["name"]:
-                            _log.error("=== _add_columns_if_missing: invalid column name %s, skipping ===", cd["name"])
+            async def _column_exists(table: str, col: str) -> bool:
+                if is_sqlite:
+                    rows = await conn.execute(text(f'PRAGMA table_info("{table}")'))
+                    for r in rows.fetchall():
+                        if r[1] == col:
+                            return True
+                    return False
+                else:
+                    rows = await conn.execute(
+                        text(
+                            "SELECT 1 FROM information_schema.columns "
+                            "WHERE table_schema='public' AND table_name=:t AND column_name=:c"
+                        ),
+                        {"t": table, "c": col},
+                    )
+                    return rows.first() is not None
+
+            async def _add_columns_if_missing(table: str, column_defs: list) -> None:
+                """Add columns to `table` if they don't exist. column_defs is a list of dicts: {name, type, default, nullable}."""
+                safe_table = "".join(ch for ch in table if ch.isalnum() or ch == "_")
+                if safe_table != table:
+                    _log.error("=== _add_columns_if_missing: invalid table name %s, skipping ===", table)
+                    return
+                for cd in column_defs:
+                    col_name = "".join(ch for ch in cd["name"] if ch.isalnum() or ch == "_")
+                    if col_name != cd["name"]:
+                        _log.error("=== _add_columns_if_missing: invalid column name %s, skipping ===", cd["name"])
+                        continue
+                    try:
+                        if await _column_exists(safe_table, col_name):
                             continue
-                        try:
-                            check_sql = (
-                                f"SELECT 1 FROM information_schema.columns "
-                                f"WHERE table_schema='public' AND table_name='{safe_table}' "
-                                f"AND column_name='{col_name}' LIMIT 1"
-                            )
-                            exists = await conn.execute(text(check_sql))
-                            if exists.first() is not None:
-                                continue
-                            nullable = "NULL" if cd.get("nullable", True) else "NOT NULL"
-                            default = f" DEFAULT {cd['default']}" if cd.get("default") is not None else ""
-                            # Use IF NOT EXISTS so this is safe to run multiple times even if the
-                            # existence check above missed (e.g. concurrent run or different schema).
-                            sql = f'ALTER TABLE "{safe_table}" ADD COLUMN IF NOT EXISTS "{col_name}" {cd["type"]} {nullable}{default}'
-                            _log.warning("=== Running: %s ===", sql)
-                            await conn.execute(text(sql))
-                            _log.warning("=== Added column %s.%s ===", safe_table, col_name)
-                        except Exception as ce:
-                            _log.warning("=== _add_columns_if_missing skipped %s.%s: %s ===", safe_table, col_name, ce)
+                        nullable = "NULL" if cd.get("nullable", True) else "NOT NULL"
+                        default_clause = f" DEFAULT {cd['default']}" if cd.get("default") is not None else ""
+                        # SQLite doesn't support IF NOT EXISTS on ALTER TABLE ADD COLUMN, but
+                        # the existence check above handles that. PostgreSQL: same.
+                        sql = f'ALTER TABLE "{safe_table}" ADD COLUMN "{col_name}" {cd["type"]} {nullable}{default_clause}'
+                        _log.warning("=== Running: %s ===", sql)
+                        await conn.execute(text(sql))
+                        _log.warning("=== Added column %s.%s ===", safe_table, col_name)
+                    except Exception as ce:
+                        _log.warning("=== _add_columns_if_missing skipped %s.%s: %s ===", safe_table, col_name, ce)
 
-                await _add_columns_if_missing("email_messages", [
-                    {"name": "direction", "type": "VARCHAR(20)", "nullable": True, "default": "'outbound'"},
-                ])
+            await _add_columns_if_missing("email_messages", [
+                {"name": "direction", "type": "VARCHAR(20)", "nullable": True, "default": "'outbound'"},
+            ])
 
-                # Apply all migrations (each column is queried first, only added if missing).
-                # NOTE: this is the actual source of truth for the live DB schema. When adding
-                # new columns to a model, ALSO add them here.
-                await _add_columns_if_missing(conn, "research_results", [
-                    {"name": "business_type", "type": "VARCHAR(255)", "nullable": True},
-                    {"name": "city", "type": "VARCHAR(255)", "nullable": True},
-                    {"name": "state", "type": "VARCHAR(255)", "nullable": True},
-                    {"name": "country", "type": "VARCHAR(100)", "nullable": True},
-                    {"name": "postal_code", "type": "VARCHAR(20)", "nullable": True},
-                ])
+            # Apply all migrations (each column is queried first, only added if missing).
+            # NOTE: this is the actual source of truth for the live DB schema. When adding
+            # new columns to a model, ALSO add them here.
+            await _add_columns_if_missing("research_results", [
+                {"name": "business_type", "type": "VARCHAR(255)", "nullable": True},
+                {"name": "city", "type": "VARCHAR(255)", "nullable": True},
+                {"name": "state", "type": "VARCHAR(255)", "nullable": True},
+                {"name": "country", "type": "VARCHAR(100)", "nullable": True},
+                {"name": "postal_code", "type": "VARCHAR(20)", "nullable": True},
+            ])
 
-                await _add_columns_if_missing(conn, "missions", [
-                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
-                    {"name": "vp_id", "type": "VARCHAR", "nullable": True},
-                    {"name": "name", "type": "VARCHAR(255)", "nullable": True},
-                    {"name": "objective", "type": "TEXT", "nullable": True},
-                    {"name": "kpi_target", "type": "TEXT", "nullable": True},
-                    {"name": "status", "type": "VARCHAR(50)", "nullable": True, "default": "'draft'"},
-                    {"name": "vp_reasoning", "type": "TEXT", "nullable": True},
-                ])
+            await _add_columns_if_missing("missions", [
+                {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                {"name": "vp_id", "type": "VARCHAR", "nullable": True},
+                {"name": "name", "type": "VARCHAR(255)", "nullable": True},
+                {"name": "objective", "type": "TEXT", "nullable": True},
+                {"name": "kpi_target", "type": "TEXT", "nullable": True},
+                {"name": "status", "type": "VARCHAR(50)", "nullable": True, "default": "'draft'"},
+                {"name": "vp_reasoning", "type": "TEXT", "nullable": True},
+            ])
 
-                await _add_columns_if_missing(conn, "mission_tasks", [
-                    {"name": "mission_id", "type": "VARCHAR", "nullable": True},
-                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
-                    {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
-                    {"name": "agent_id", "type": "VARCHAR", "nullable": True},
-                    {"name": "objective", "type": "TEXT", "nullable": True},
-                    {"name": "execution_plan", "type": "JSON", "nullable": True},
-                    {"name": "status", "type": "VARCHAR(50)", "nullable": True, "default": "'pending'"},
-                    {"name": "report", "type": "JSON", "nullable": True},
-                    {"name": "confidence_score", "type": "FLOAT", "nullable": True},
-                    {"name": "vp_feedback", "type": "VARCHAR(50)", "nullable": True},
-                    {"name": "vp_notes", "type": "TEXT", "nullable": True},
-                ])
+            await _add_columns_if_missing("mission_tasks", [
+                {"name": "mission_id", "type": "VARCHAR", "nullable": True},
+                {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
+                {"name": "agent_id", "type": "VARCHAR", "nullable": True},
+                {"name": "objective", "type": "TEXT", "nullable": True},
+                {"name": "execution_plan", "type": "JSON", "nullable": True},
+                {"name": "status", "type": "VARCHAR(50)", "nullable": True, "default": "'pending'"},
+                {"name": "report", "type": "JSON", "nullable": True},
+                {"name": "confidence_score", "type": "FLOAT", "nullable": True},
+                {"name": "vp_feedback", "type": "VARCHAR(50)", "nullable": True},
+                {"name": "vp_notes", "type": "TEXT", "nullable": True},
+            ])
 
-                await _add_columns_if_missing(conn, "agent_memories", [
-                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
-                    {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
-                    {"name": "memory_type", "type": "VARCHAR(50)", "nullable": True},
-                    {"name": "content", "type": "JSON", "nullable": True},
-                ])
+            await _add_columns_if_missing("agent_memories", [
+                {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
+                {"name": "memory_type", "type": "VARCHAR(50)", "nullable": True},
+                {"name": "content", "type": "JSON", "nullable": True},
+            ])
 
-                await _add_columns_if_missing(conn, "agent_performance", [
-                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
-                    {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
-                    {"name": "metric_name", "type": "VARCHAR(100)", "nullable": True},
-                    {"name": "metric_value", "type": "FLOAT", "nullable": True, "default": "0"},
-                    {"name": "period", "type": "VARCHAR(50)", "nullable": True, "default": "'all_time'"},
-                ])
+            await _add_columns_if_missing("agent_performance", [
+                {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
+                {"name": "metric_name", "type": "VARCHAR(100)", "nullable": True},
+                {"name": "metric_value", "type": "FLOAT", "nullable": True, "default": "0"},
+                {"name": "period", "type": "VARCHAR(50)", "nullable": True, "default": "'all_time'"},
+            ])
 
-                # === SDR profile channel + Vapi credentials ===
-                await _add_columns_if_missing(conn, "sdr_profiles", [
-                    {"name": "vapi_credentials_encrypted", "type": "TEXT", "nullable": True},
-                    {"name": "email_enabled", "type": "BOOLEAN", "nullable": True, "default": "TRUE"},
-                    {"name": "linkedin_enabled", "type": "BOOLEAN", "nullable": True, "default": "TRUE"},
-                    {"name": "vapi_enabled", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
-                ])
+            # === SDR profile channel + Vapi credentials ===
+            await _add_columns_if_missing("sdr_profiles", [
+                {"name": "vapi_credentials_encrypted", "type": "TEXT", "nullable": True},
+                {"name": "email_enabled", "type": "BOOLEAN", "nullable": True, "default": "TRUE"},
+                {"name": "linkedin_enabled", "type": "BOOLEAN", "nullable": True, "default": "TRUE"},
+                {"name": "vapi_enabled", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
+            ])
 
-                # === VP sales profile: outreach toggle + data source selection ===
-                await _add_columns_if_missing(conn, "vp_sales_profiles", [
-                    {"name": "outreach_active", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
-                    {"name": "target_titles", "type": "TEXT", "nullable": True},
-                    {"name": "target_business_types", "type": "TEXT", "nullable": True},
-                    {"name": "data_source", "type": "VARCHAR(50)", "nullable": True, "default": "'web_scraping'"},
-                    {"name": "data_source_config", "type": "JSON", "nullable": True},
-                    {"name": "manual_upload_done", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
-                ])
+            # === VP sales profile: outreach toggle + data source selection ===
+            await _add_columns_if_missing("vp_sales_profiles", [
+                {"name": "outreach_active", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
+                {"name": "target_titles", "type": "TEXT", "nullable": True},
+                {"name": "target_business_types", "type": "TEXT", "nullable": True},
+                {"name": "data_source", "type": "VARCHAR(50)", "nullable": True, "default": "'web_scraping'"},
+                {"name": "data_source_config", "type": "JSON", "nullable": True},
+                {"name": "manual_upload_done", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
+            ])
 
-            return True
-        except Exception as e:
-            import traceback
-            _log.critical("=== FAILED to connect to PostgreSQL: %s ===", e)
-            _log.critical(traceback.format_exc())
-            return False
+        return True
+    except Exception as e:
+        import traceback
+        _log.critical("=== FAILED to init database: %s ===", e)
+        _log.critical(traceback.format_exc())
+        return False
 
 
 SUPABASE_URL: Optional[str] = None
@@ -238,3 +245,4 @@ def init_supabase():
     SUPABASE_URL = settings.SUPABASE_URL
     SUPABASE_SERVICE_KEY = settings.SUPABASE_SERVICE_KEY
     SUPABASE_ANON_KEY = settings.SUPABASE_ANON_KEY
+
