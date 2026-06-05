@@ -113,107 +113,101 @@ async def init_db() -> bool:
                 if missing and has_feature_flags:
                     _log.warning("=== Tables MISSING after create_all (will be ignored): %s ===", sorted(missing))
 
-                # Use SAVEPOINT so ALTER TABLE failure doesn't abort the entire transaction
-                try:
-                    await conn.execute(text("SAVEPOINT alter_savepoint"))
-                    await conn.execute(
-                        text("ALTER TABLE email_messages ADD COLUMN direction VARCHAR(20) DEFAULT 'outbound'")
-                    )
-                    await conn.execute(text("RELEASE SAVEPOINT alter_savepoint"))
-                except Exception:
-                    try:
-                        await conn.execute(text("ROLLBACK TO SAVEPOINT alter_savepoint"))
-                    except Exception:
-                        pass
-
-                for col in [
-                    "ADD COLUMN business_type VARCHAR(255)",
-                    "ADD COLUMN city VARCHAR(255)",
-                    "ADD COLUMN state VARCHAR(255)",
-                    "ADD COLUMN country VARCHAR(100)",
-                    "ADD COLUMN postal_code VARCHAR(20)",
-                ]:
-                    try:
-                        await conn.execute(text("SAVEPOINT mig_sp"))
-                        await conn.execute(text(f"ALTER TABLE research_results {col}"))
-                        await conn.execute(text("RELEASE SAVEPOINT mig_sp"))
-                    except Exception:
+                # Single helper: query information_schema first, only ALTER if column missing.
+                # This avoids the SAVEPOINT/asyncpg interaction problem.
+                async def _add_columns_if_missing(table: str, column_defs: list) -> None:
+                    """Add columns to `table` if they don't exist. column_defs is a list of dicts: {name, type, default, nullable}."""
+                    for cd in column_defs:
+                        col_name = cd["name"]
                         try:
-                            await conn.execute(text("ROLLBACK TO SAVEPOINT mig_sp"))
-                        except Exception:
-                            pass
+                            exists = await conn.execute(
+                                text(
+                                    "SELECT 1 FROM information_schema.columns "
+                                    "WHERE table_schema='public' AND table_name=:t AND column_name=:c"
+                                ),
+                                {"t": table, "c": col_name},
+                            )
+                            if exists.first() is not None:
+                                continue
+                            nullable = "NULL" if cd.get("nullable", True) else "NOT NULL"
+                            default = f" DEFAULT {cd['default']}" if cd.get("default") is not None else ""
+                            sql = f'ALTER TABLE "{table}" ADD COLUMN "{col_name}" {cd["type"]} {nullable}{default}'
+                            await conn.execute(text(sql))
+                            _log.warning("=== Added column %s.%s ===", table, col_name)
+                        except Exception as ce:
+                            _log.warning("=== _add_columns_if_missing skipped %s.%s: %s ===", table, col_name, ce)
 
-            for tname, cols in [
-                ("missions", [
-                    "ADD COLUMN org_id VARCHAR",
-                    "ADD COLUMN vp_id VARCHAR",
-                    "ADD COLUMN name VARCHAR(255)",
-                    "ADD COLUMN objective TEXT",
-                    "ADD COLUMN kpi_target TEXT",
-                    "ADD COLUMN status VARCHAR(50) DEFAULT 'draft'",
-                    "ADD COLUMN vp_reasoning TEXT",
-                ]),
-                ("mission_tasks", [
-                    "ADD COLUMN mission_id VARCHAR",
-                    "ADD COLUMN org_id VARCHAR",
-                    "ADD COLUMN agent_type VARCHAR(50)",
-                    "ADD COLUMN agent_id VARCHAR",
-                    "ADD COLUMN objective TEXT",
-                    "ADD COLUMN execution_plan JSON",
-                    "ADD COLUMN status VARCHAR(50) DEFAULT 'pending'",
-                    "ADD COLUMN report JSON",
-                    "ADD COLUMN confidence_score FLOAT",
-                    "ADD COLUMN vp_feedback VARCHAR(50)",
-                    "ADD COLUMN vp_notes TEXT",
-                ]),
-                ("agent_memories", [
-                    "ADD COLUMN org_id VARCHAR",
-                    "ADD COLUMN agent_type VARCHAR(50)",
-                    "ADD COLUMN memory_type VARCHAR(50)",
-                    "ADD COLUMN content JSON",
-                ]),
-                ("agent_performance", [
-                    "ADD COLUMN org_id VARCHAR",
-                    "ADD COLUMN agent_type VARCHAR(50)",
-                    "ADD COLUMN metric_name VARCHAR(100)",
-                    "ADD COLUMN metric_value FLOAT DEFAULT 0",
-                    "ADD COLUMN period VARCHAR(50) DEFAULT 'all_time'",
-                ]),
-                ("sdr_profiles", [
-                    "ADD COLUMN vapi_credentials_encrypted TEXT",
-                    "ADD COLUMN email_enabled BOOLEAN DEFAULT TRUE",
-                    "ADD COLUMN linkedin_enabled BOOLEAN DEFAULT TRUE",
-                    "ADD COLUMN vapi_enabled BOOLEAN DEFAULT FALSE",
-                ]),
-            ]:
-                for col in cols:
-                    try:
-                        await conn.execute(text("SAVEPOINT mig_vp"))
-                        await conn.execute(text(f"ALTER TABLE {tname} {col}"))
-                        await conn.execute(text("RELEASE SAVEPOINT mig_vp"))
-                    except Exception:
-                        try:
-                            await conn.execute(text("ROLLBACK TO SAVEPOINT mig_vp"))
-                        except Exception:
-                            pass
+                await _add_columns_if_missing("email_messages", [
+                    {"name": "direction", "type": "VARCHAR(20)", "nullable": True, "default": "'outbound'"},
+                ])
 
-            for col in [
-                "ADD COLUMN outreach_active BOOLEAN DEFAULT FALSE",
-                "ADD COLUMN target_titles TEXT",
-                "ADD COLUMN target_business_types TEXT",
-                "ADD COLUMN data_source VARCHAR(50) DEFAULT 'web_scraping'",
-                "ADD COLUMN data_source_config JSON",
-                "ADD COLUMN manual_upload_done BOOLEAN DEFAULT FALSE",
-            ]:
-                    try:
-                        await conn.execute(text("SAVEPOINT mig_sp2"))
-                        await conn.execute(text(f"ALTER TABLE vp_sales_profiles {col}"))
-                        await conn.execute(text("RELEASE SAVEPOINT mig_sp2"))
-                    except Exception:
-                        try:
-                            await conn.execute(text("ROLLBACK TO SAVEPOINT mig_sp2"))
-                        except Exception:
-                            pass
+                # Apply all migrations (each column is queried first, only added if missing).
+                # NOTE: this is the actual source of truth for the live DB schema. When adding
+                # new columns to a model, ALSO add them here.
+                await _add_columns_if_missing(conn, "research_results", [
+                    {"name": "business_type", "type": "VARCHAR(255)", "nullable": True},
+                    {"name": "city", "type": "VARCHAR(255)", "nullable": True},
+                    {"name": "state", "type": "VARCHAR(255)", "nullable": True},
+                    {"name": "country", "type": "VARCHAR(100)", "nullable": True},
+                    {"name": "postal_code", "type": "VARCHAR(20)", "nullable": True},
+                ])
+
+                await _add_columns_if_missing(conn, "missions", [
+                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                    {"name": "vp_id", "type": "VARCHAR", "nullable": True},
+                    {"name": "name", "type": "VARCHAR(255)", "nullable": True},
+                    {"name": "objective", "type": "TEXT", "nullable": True},
+                    {"name": "kpi_target", "type": "TEXT", "nullable": True},
+                    {"name": "status", "type": "VARCHAR(50)", "nullable": True, "default": "'draft'"},
+                    {"name": "vp_reasoning", "type": "TEXT", "nullable": True},
+                ])
+
+                await _add_columns_if_missing(conn, "mission_tasks", [
+                    {"name": "mission_id", "type": "VARCHAR", "nullable": True},
+                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                    {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
+                    {"name": "agent_id", "type": "VARCHAR", "nullable": True},
+                    {"name": "objective", "type": "TEXT", "nullable": True},
+                    {"name": "execution_plan", "type": "JSON", "nullable": True},
+                    {"name": "status", "type": "VARCHAR(50)", "nullable": True, "default": "'pending'"},
+                    {"name": "report", "type": "JSON", "nullable": True},
+                    {"name": "confidence_score", "type": "FLOAT", "nullable": True},
+                    {"name": "vp_feedback", "type": "VARCHAR(50)", "nullable": True},
+                    {"name": "vp_notes", "type": "TEXT", "nullable": True},
+                ])
+
+                await _add_columns_if_missing(conn, "agent_memories", [
+                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                    {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
+                    {"name": "memory_type", "type": "VARCHAR(50)", "nullable": True},
+                    {"name": "content", "type": "JSON", "nullable": True},
+                ])
+
+                await _add_columns_if_missing(conn, "agent_performance", [
+                    {"name": "org_id", "type": "VARCHAR", "nullable": True},
+                    {"name": "agent_type", "type": "VARCHAR(50)", "nullable": True},
+                    {"name": "metric_name", "type": "VARCHAR(100)", "nullable": True},
+                    {"name": "metric_value", "type": "FLOAT", "nullable": True, "default": "0"},
+                    {"name": "period", "type": "VARCHAR(50)", "nullable": True, "default": "'all_time'"},
+                ])
+
+                # === SDR profile channel + Vapi credentials ===
+                await _add_columns_if_missing(conn, "sdr_profiles", [
+                    {"name": "vapi_credentials_encrypted", "type": "TEXT", "nullable": True},
+                    {"name": "email_enabled", "type": "BOOLEAN", "nullable": True, "default": "TRUE"},
+                    {"name": "linkedin_enabled", "type": "BOOLEAN", "nullable": True, "default": "TRUE"},
+                    {"name": "vapi_enabled", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
+                ])
+
+                # === VP sales profile: outreach toggle + data source selection ===
+                await _add_columns_if_missing(conn, "vp_sales_profiles", [
+                    {"name": "outreach_active", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
+                    {"name": "target_titles", "type": "TEXT", "nullable": True},
+                    {"name": "target_business_types", "type": "TEXT", "nullable": True},
+                    {"name": "data_source", "type": "VARCHAR(50)", "nullable": True, "default": "'web_scraping'"},
+                    {"name": "data_source_config", "type": "JSON", "nullable": True},
+                    {"name": "manual_upload_done", "type": "BOOLEAN", "nullable": True, "default": "FALSE"},
+                ])
 
             return True
         except Exception as e:
