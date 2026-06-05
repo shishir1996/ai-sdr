@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 from app.database import get_db
 from app.models.user import User
@@ -225,6 +225,9 @@ async def update_lead(
     return lead
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: List[str]
+
 @router.delete("/{lead_id}")
 async def delete_lead(
     lead_id: str,
@@ -237,6 +240,22 @@ async def delete_lead(
         raise HTTPException(status_code=404, detail="Lead not found")
     await db.delete(lead)
     return {"status": "deleted"}
+
+@router.post("/bulk-delete")
+async def bulk_delete_leads(
+    req: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not req.ids:
+        return {"deleted": 0}
+    result = await db.execute(
+        select(Lead).where(Lead.id.in_(req.ids), Lead.org_id == user.org_id)
+    )
+    leads = result.scalars().all()
+    for lead in leads:
+        await db.delete(lead)
+    return {"deleted": len(leads)}
 
 
 @router.post("/import/csv")

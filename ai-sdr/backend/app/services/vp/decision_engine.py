@@ -297,9 +297,47 @@ async def _create_outreach_mission(db: AsyncSession, org_id: str, vp_id: str, mi
 
 
 async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile,
-                             progress_session: Optional[str] = None) -> dict:
+                             progress_session: Optional[str] = None,
+                             force_research: bool = False) -> dict:
+    if force_research:
+        # First wipe all old data so VP starts clean
+        from app.models.vp_sales import ResearchResult, ResearchAgentModel, VPActionLog
+        from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
+        from app.models.lead import Lead
+        from app.models.agent import SDRProfile, LeadState
+        from app.models.campaign import Campaign, CampaignStep, CampaignEvent
+        tables = [
+            ResearchResult, ResearchAgentModel, VPActionLog,
+            AgentMemory, AgentPerformance,
+            MissionTask, Mission,
+            LeadState, SDRProfile,
+            CampaignEvent, CampaignStep, Campaign,
+            Lead,
+        ]
+        for table in tables:
+            result = await db.execute(select(table).where(table.org_id == org_id))
+            for row in result.scalars().all():
+                await db.delete(row)
+        await db.flush()
+        clear_search_progress(org_id)
+
     situation = await assess_situation(db, org_id)
-    decision = await _vp_decide(db, org_id, vp, situation)
+
+    if force_research:
+        biz = vp.target_business_types or vp.icp_description or "businesses"
+        country = vp.target_country or "global"
+        decision = {
+            "action": "research",
+            "reasoning": f"Force research: finding {biz} in {country}.",
+            "mission": {
+                "name": f"Find {country} {biz}",
+                "objective": f"Find real {biz} owners in {country} with email and phone. Target: {vp.product_name or ''} ICP.",
+                "kpi": "At least 20 leads with verified contact info",
+            },
+        }
+        situation = {"leads": 0, "unconverted_research": 0, "sdrs": 0, "active_sdrs": 0, "active_missions": 0, "research_agents": 0, "sources": []}
+    else:
+        decision = await _vp_decide(db, org_id, vp, situation)
 
     await log_vp_action(db, org_id, vp.id, decision["action"], decision["reasoning"])
 

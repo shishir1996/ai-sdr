@@ -55,6 +55,7 @@ class MissionCreateRequest(BaseModel):
 
 class DecideRequest(BaseModel):
     progress_session: Optional[str] = None
+    force_research: bool = False
 
 class MissionTaskFeedbackRequest(BaseModel):
     task_id: str
@@ -203,7 +204,8 @@ async def vp_decide(
         raise HTTPException(status_code=404, detail="Create VP profile first")
 
     result = await decide_and_execute(db, user.org_id, vp,
-                                       progress_session=req.progress_session if req else None)
+                                       progress_session=req.progress_session if req else None,
+                                       force_research=req.force_research if req else False)
     return result
 
 
