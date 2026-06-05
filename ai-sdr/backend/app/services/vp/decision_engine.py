@@ -5,10 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models.vp_sales import VPSalesProfile, ResearchResult, VPActionLog
 from app.models.vp_sales import ResearchAgent as ResearchAgentModel
-from app.models.vp_orchestration import Mission, MissionTask
-from app.models.agent import SDRProfile
+from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
+from app.models.agent import SDRProfile, LeadState
 from app.models.lead import Lead
+from app.models.campaign import Campaign, CampaignStep, CampaignEvent
 from app.services.lead_sources.service import get_enabled_sources
+from app.services.research.search_service import clear_search_progress
 from app.services.research.agent_service import convert_to_lead
 from app.services.mission.mission_service import (
     create_mission, decompose_mission, evaluate_mission_reports,
@@ -301,11 +303,6 @@ async def decide_and_execute(db: AsyncSession, org_id: str, vp: VPSalesProfile,
                              force_research: bool = False) -> dict:
     if force_research:
         # First wipe all old data so VP starts clean
-        from app.models.vp_sales import ResearchResult, ResearchAgentModel, VPActionLog
-        from app.models.vp_orchestration import Mission, MissionTask, AgentMemory, AgentPerformance
-        from app.models.lead import Lead
-        from app.models.agent import SDRProfile, LeadState
-        from app.models.campaign import Campaign, CampaignStep, CampaignEvent
         tables = [
             ResearchResult, ResearchAgentModel, VPActionLog,
             AgentMemory, AgentPerformance,
